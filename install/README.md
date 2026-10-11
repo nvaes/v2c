@@ -149,7 +149,7 @@ artefacts de build, `.env`, le VDDK et les données de lab sont exclus par
 
 ```bash
 # Sur la VM :
-git clone <url-du-depot> ~/v2fc-deploy
+git clone git@github.com:nvaes/v2c.git ~/v2fc-deploy
 ```
 
 `install/` et `v2fc/` restent ainsi côte à côte, comme le supposent tous

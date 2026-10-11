@@ -64,7 +64,7 @@ dans [`HANDOFF.md`](HANDOFF.md).
 ## Installation rapide
 
 ```bash
-git clone <url-du-depot> v2fc-deploy
+git clone git@github.com:nvaes/v2c.git v2fc-deploy
 cd v2fc-deploy
 
 # 1. Diagnostic (ne modifie rien)
