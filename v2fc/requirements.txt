@@ -1,0 +1,3 @@
+# Le VDDK n'est PAS une dépendance pip : sous licence VMware, monté à part.
+pyvmomi>=8.0.3,<10
+requests>=2.31,<3  # datamover.fusioncompute — client REST du VRM (§7.5)

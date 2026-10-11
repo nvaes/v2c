@@ -1,0 +1,38 @@
+# --- VDDK VMware : sous licence, redistribution interdite --------------------
+# À récupérer sur le portail Broadcom/VMware et décompresser à la racine.
+VMware-vix-disklib-*
+vmware-vix-disklib-distrib*/
+
+# --- Secrets ---------------------------------------------------------------
+.env
+!.env.example
+
+# --- Données de lab (images disque de plusieurs Gio, noms de VM/hôtes) ------
+lab-out/
+v2fc/lab-vcenter-out/
+v2fc/lab/*.vmdk
+v2fc/lab/*.raw
+*.raw
+*.vmdk
+
+# --- Archives et documentation propriétaire tierce --------------------------
+*.tar.gz
+docs-fusioncompute/
+
+# --- Doublon de v2fc/tools/vddk_probe.py (fichier identique) ----------------
+/tools/
+
+# --- Artefacts de build / caches -------------------------------------------
+node_modules/
+v2fc/web/dist/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# --- OS / éditeurs ---------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/

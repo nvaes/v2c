@@ -1,0 +1,5 @@
+lab/*.vmdk
+lab/*.raw
+**/__pycache__
+vmware-vix-disklib-distrib/
+*.tar.gz

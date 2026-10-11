@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+alembic==1.14.0
+pydantic==2.10.4
+pyjwt==2.10.1
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # épinglé : passlib 1.7.4 ne connaît pas les versions bcrypt >= 4.1 (avertissement inoffensif sinon)
+cryptography==44.0.0
+redis==5.2.1
+python-multipart==0.0.20
+pyvmomi>=8.0.3,<10  # même contrainte que v2fc/requirements.txt
+requests>=2.31,<3  # datamover.fusioncompute — client REST du VRM (§7.5)

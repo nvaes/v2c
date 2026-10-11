@@ -1,0 +1,89 @@
+# Socle L0b — orchestrateur web (ARCHITECTURE.md §8). Le Data Mover
+# (Dockerfile racine, VDDK) n'est PAS dans ce compose : il tourne à la
+# demande depuis la CLI (v2fc_source.py), monté avec le VDDK et
+# --platform linux/amd64, pas comme service permanent.
+#
+# Démarrage détaillé : voir HANDOFF.md §11. En résumé :
+#   cp .env.example .env   # puis éditer JWT_SECRET / V2FC_KEK (commandes dans .env.example)
+#   docker compose build
+#   docker compose up -d postgres redis
+#   docker compose up -d api web
+#   docker compose exec api python3 -m api.seed_admin --email admin@example.com
+#     (mot de passe demandé de façon interactive : seed_admin.py ne l'accepte
+#     jamais en argument, cf. api/seed_admin.py)
+#
+# api applique ses migrations Alembic tout seul à chaque démarrage (voir
+# api/Dockerfile) — pas d'étape manuelle "migrate" à part.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-v2fc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-v2fc}
+      POSTGRES_DB: ${POSTGRES_DB:-v2fc}
+    volumes:
+      - v2fc-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-v2fc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # Volume nommé : le dernier inventaire/datastores/réseaux connus
+    # (api/cache.py, sans TTL depuis le 17/09/2026) survivent ainsi à un
+    # `docker compose down` + `up`, pas seulement à un redémarrage du
+    # conteneur. Ce n'est qu'un raccourci de confort (pas la source de
+    # vérité) : sa perte ne fait que forcer un nouveau scan complet.
+    volumes:
+      - v2fc-redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-v2fc}:${POSTGRES_PASSWORD:-v2fc}@postgres:5432/${POSTGRES_DB:-v2fc}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?voir .env.example}
+      V2FC_KEK: ${V2FC_KEK:?voir .env.example}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  web:
+    build:
+      context: web
+    depends_on:
+      - api
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8000
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      # Montage du code en dev pour le rechargement à chaud (Vite) ; le
+      # node_modules du conteneur reste isolé grâce au volume anonyme
+      # ci-dessous (sinon le node_modules du poste, potentiellement
+      # d'une autre architecture, écraserait celui installé dans l'image).
+      - ./web:/work
+      - /work/node_modules
+
+volumes:
+  v2fc-postgres-data:
+  v2fc-redis-data:
