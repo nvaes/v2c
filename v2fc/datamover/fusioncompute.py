@@ -83,6 +83,19 @@ def _full_urn(site_id: str, kind: str, urn: str) -> str:
     return urn if urn.startswith("urn:") else f"urn:sites:{site_id}:{kind}:{urn}"
 
 
+def guest_disk_path(volume_uuid: str) -> str:
+    """
+    Chemin stable, dans la VM relais, d'un volume attaché en VIRTIO (bus par
+    défaut de `createattachvol`). D5 tranché le 26/10/2026 sur le VRM de
+    Nicolas : FusionCompute passe l'UUID du volume comme numéro de série
+    virtio, tronqué à 20 caractères — volume 61172379-913f-4377-a541-...
+    vu comme /dev/disk/by-id/virtio-61172379-913f-4377-a -> /dev/vdb.
+    Aucune déduction par ordre d'attachement (vdb, vdc...) : ce lien
+    désigne toujours le bon volume, même attachés en parallèle.
+    """
+    return f"/dev/disk/by-id/virtio-{volume_uuid[:20]}"
+
+
 def _error_detail(resp: "requests.Response") -> str:
     try:
         body = resp.json()
@@ -386,6 +399,10 @@ class FusionComputeClient:
         if sequence_num is not None:
             body["sequenceNum"] = sequence_num
         return self._post(f"/sites/{self.site.id}/vms/{vm_id}/action/createattachvol", body)
+
+    def get_volume(self, vol_id: str) -> dict:
+        """`GET <vol_uri>/<vol_id>` — notamment `uuid`, voir `guest_disk_path`."""
+        return self._get(f"/sites/{self.site.id}/volumes/{vol_id}")
 
     def attach_volume(self, vm_id: str, *, vol_urn: str, pci_type: str = "VIRTIO",
                       sequence_num: int | None = None, io_mode: str | None = None,

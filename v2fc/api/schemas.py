@@ -315,6 +315,25 @@ class JobRunContext(BaseModel):
     vm_moref: str
     vm_instance_uuid: str
     vm_name: str
+    # Volumes FusionCompute attachés au relais (vide sans relais : écriture
+    # dans le --target-dir local, mode POC).
+    disks: list["RunContextDisk"] = Field(default_factory=list)
+
+
+class RunContextDisk(BaseModel):
+    device_key: int
+    tgt_dev_path: str | None
+    volume_id: str | None
+
+
+class RunnerWorkItem(BaseModel):
+    job_id: uuid.UUID
+    round: str
+
+
+class RunnerSourceCredentials(BaseModel):
+    user: str
+    password: str
 
 
 class JobRoundStart(BaseModel):

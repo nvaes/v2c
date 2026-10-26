@@ -52,7 +52,8 @@ router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 # ---------------------------------------------------------------------------
 _PROVISIONABLE = {"CREATED", "VALIDATING"}
 _SEED_STATES = {"SEEDING"}
-_DELTA_STATES = {"SYNCED"}
+# SYNCING : reprise d'un delta interrompu (le round « running » est réutilisé).
+_DELTA_STATES = {"SYNCED", "SYNCING"}
 _FINAL_STATES = {"FINAL_DELTA"}
 _CUTOVER_FROM = {"SYNCED"}
 _ROLLBACK_FROM = {"CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA", "FINALIZING", "CUTOVER_DONE"}
@@ -229,6 +230,9 @@ async def provision_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                         datastore_urn=plan_vm.tgt_datastore_urn)
                     await run_in_threadpool(fc_client.wait_task, resp["taskUri"])
                     job_disk.tgt_volume_uri = resp["uri"]
+                    volume = await run_in_threadpool(
+                        fc_client.get_volume, resp["uri"].rstrip("/").rsplit("/", 1)[-1])
+                    job_disk.tgt_dev_path = fc.guest_disk_path(volume["uuid"])
                     await _log(db, job.id,
                               f"volume {resp['urn']} créé et attaché au relais pour le disque {d['device_key']}")
                 except fc.FusionComputeError as exc:
@@ -299,9 +303,12 @@ async def get_run_context(job_id: uuid.UUID, round: str,
         round_row = existing
 
     source = await db.get(Endpoint, job.source_id)
+    job_disks = (await db.execute(select(JobDisk).where(JobDisk.job_id == job_id))).scalars().all()
     await _log(db, job.id, f"round {kind} (#{round_row.round_no}) démarré (job-run)")
     await db.commit()
     return {
+        "disks": [{"device_key": d.device_key, "tgt_dev_path": d.tgt_dev_path,
+                   "volume_id": d.tgt_volume_uri} for d in job_disks],
         "job_id": job.id, "round_id": round_row.id, "round_kind": kind,
         "round_no": round_row.round_no, "src_host": source.url, "src_port": source.port,
         "src_verify_tls": source.verify_tls, "vm_moref": job.src_vm_moref,

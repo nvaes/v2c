@@ -230,10 +230,14 @@ est un champ obligatoire du schéma mais réservé et non utilisé tant qu'un
 agent réseau n'existe pas (D7 : il n'y en aura pas dans ce déploiement) —
 n'importe quelle valeur non vide convient.
 
-Une fois le relais enregistré, l'onglet Migration propose la commande
-`job-run` à copier-coller : elle s'exécute maintenant depuis cette VM
-elle-même (chemins locaux, image `v2fc-datamover` construite ici), plus
-depuis ton Mac.
+Une fois le relais enregistré, choisis-le à la création du job (onglet
+Migration). Le service `runner` (démarré par `start-webapp.sh` dès que le
+VDDK est présent) exécute alors tout seul le seed après le provisioning, un
+delta toutes les `V2FC_DELTA_INTERVAL_MIN` minutes (60 par défaut, dans
+`v2fc/.env`) et le delta final après « Migrer maintenant ». Il écrit
+directement sur les volumes FusionCompute attachés à cette VM
+(`/dev/disk/by-id/virtio-<UUID du volume>`). Suivi :
+`docker compose logs -f runner` et l'onglet Logs.
 
 ## Contenu de ce dossier
 

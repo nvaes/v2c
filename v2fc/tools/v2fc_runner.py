@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""
+Runner V2FC — exécute les rounds de migration sans intervention (ajouté le
+26/10/2026, à la demande de Nicolas : « ça doit être en automatique »).
+
+Tourne dans le service `runner` de docker-compose.yml, sur la VM relais
+elle-même (accès à /dev pour les volumes FusionCompute attachés) avec le
+VDDK monté. En boucle :
+
+  1. demande à l'API ce qu'il y a à faire (`GET /api/v1/runner/work`) :
+     seed après provisioning, delta périodique, delta final après bascule ;
+  2. pour chaque round, récupère les identifiants source et lance
+     `v2fc_source.py job-run` en sous-processus — exactement la commande
+     que la page Migration affichait jusqu'ici, plus rien à copier.
+
+Un job déjà en cours n'est jamais relancé en double ; `job-run` rapporte
+lui-même résultat et logs à l'API.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import requests
+
+log = logging.getLogger("v2fc.runner")
+
+API_URL = os.environ.get("V2FC_API_URL", "http://api:8000").rstrip("/")
+TOKEN = os.environ.get("V2FC_RUNNER_TOKEN", "")
+STATE_ROOT = Path(os.environ.get("V2FC_RUNNER_STATE", "/var/lib/v2fc/jobs"))
+POLL_S = float(os.environ.get("V2FC_RUNNER_POLL_S", "15"))
+MAX_PARALLEL = int(os.environ.get("V2FC_RUNNER_MAX_PARALLEL", "4"))
+TRANSPORT = os.environ.get("V2FC_RUNNER_TRANSPORT", "nbdssl")
+
+SOURCE_CLI = Path(__file__).with_name("v2fc_source.py")
+
+
+def _get(path: str) -> requests.Response:
+    resp = requests.get(f"{API_URL}{path}", timeout=30,
+                        headers={"Authorization": f"Bearer {TOKEN}"})
+    resp.raise_for_status()
+    return resp
+
+
+def _start_round(job_id: str, round_kind: str) -> subprocess.Popen:
+    cred = _get(f"/api/v1/runner/jobs/{job_id}/source-credentials").json()
+    env = {**os.environ, "V2FC_API_TOKEN": TOKEN,
+           "V2FC_VC_USER": cred["user"], "V2FC_VC_PASSWORD": cred["password"]}
+    cmd = [sys.executable, str(SOURCE_CLI), "job-run", "--api-url", API_URL,
+           "--job-id", job_id, "--round", round_kind,
+           "--target-dir", str(STATE_ROOT / job_id),
+           "--transport", TRANSPORT, "--require", TRANSPORT]
+    log.info("job %s : round %s lancé", job_id, round_kind)
+    return subprocess.Popen(cmd, env=env)
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    if not TOKEN:
+        sys.exit("V2FC_RUNNER_TOKEN non défini — voir .env.example")
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    running: dict[str, tuple[str, subprocess.Popen]] = {}
+
+    log.info("runner démarré — API %s, %d round(s) en parallèle au plus",
+             API_URL, MAX_PARALLEL)
+    while True:
+        for job_id, (round_kind, proc) in list(running.items()):
+            rc = proc.poll()
+            if rc is not None:
+                log.info("job %s : round %s terminé (code %s)", job_id, round_kind, rc)
+                del running[job_id]
+
+        try:
+            work = _get("/api/v1/runner/work").json()
+        except requests.RequestException as exc:
+            log.warning("API injoignable : %s", exc)
+            work = []
+
+        for item in work:
+            if item["job_id"] in running or len(running) >= MAX_PARALLEL:
+                continue
+            try:
+                running[item["job_id"]] = (item["round"],
+                                           _start_round(item["job_id"], item["round"]))
+            except requests.RequestException as exc:
+                log.warning("job %s : lancement impossible : %s", item["job_id"], exc)
+
+        time.sleep(POLL_S)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

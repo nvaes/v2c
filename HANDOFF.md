@@ -1598,3 +1598,33 @@ invalide »), mais le job passait quand même en SEEDING — un seed aurait
   en FAILED (502), au lieu de SEEDING.
 - **Pas encore vérifié** : la création d'un volume avec l'URN complète n'a
   pas été testée sur le VRM (essai bloqué côté permissions de la session).
+
+## 21. Rounds automatiques : écriture sur le relais + service runner (26/10/2026)
+
+Demande de Nicolas : plus de commande `job-run` à copier, « ça doit être
+en automatique ». Validé sur le VRM réel avant d'écrire le code :
+`createattachvol` (URN complète, §20) crée et attache un volume VIRTIO à la
+VM relais `i-0000000D` (= `dc1-migration`).
+
+- **D5 tranché** : le volume apparaît sous
+  `/dev/disk/by-id/virtio-<20 premiers caractères de son UUID>` (série
+  virtio). `fusioncompute.guest_disk_path()` ; le provisioning lit l'UUID
+  (`get_volume`) et enregistre ce chemin dans `job_disks.tgt_dev_path`.
+- **Écriture** : `run-context` renvoie les volumes ; `job-run` écrit dessus
+  au lieu de `disk-<key>.raw`, après avoir déposé la signature §7.2 au seed
+  (identifiant = URI du volume). Testé sur un volume réel de 1 Go depuis le
+  conteneur runner : O_DIRECT, relecture identique, mauvaise signature
+  refusée ; volume ensuite détaché et supprimé.
+- **Correctif** : `Mode.SEED` (zones nulles sautées) seulement pour un état
+  vierge — un re-seed après CBT invalidé écrit désormais les zéros.
+- **Runner** (`tools/v2fc_runner.py`, service `runner`, privilégié, /dev et
+  VDDK montés) : interroge `GET /api/v1/runner/work` (seed en SEEDING,
+  reprise en SYNCING, delta toutes les `V2FC_DELTA_INTERVAL_MIN` minutes en
+  SYNCED, final en FINAL_DELTA ; pause de 5 min après un échec) et lance
+  `job-run`. Authentifié par `V2FC_RUNNER_TOKEN` ; seul lui reçoit les
+  identifiants source (`/runner/jobs/{id}/source-credentials`). Seuls les
+  jobs avec relais et volumes sont automatisés ; sans relais, la page
+  affiche toujours la commande.
+- **Non testé** : un seed réel bout en bout (snapshot + VDDK nbdssl depuis
+  cette VM vers les ESXi source, port 902) ; `_finalize` (création de la VM
+  cible) ; la signature n'est pas effacée avant la bascule.

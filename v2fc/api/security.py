@@ -6,6 +6,7 @@ utilisateurs, et chiffrement enveloppe des identifiants vCenter/ESXi
 from __future__ import annotations
 
 import base64
+import hmac
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -67,8 +68,21 @@ def _decode_token(token: str) -> dict:
                             detail="jeton invalide ou expiré") from exc
 
 
+# Identité du service runner : un utilisateur « operator » qui n'existe pas
+# en base, reconnu au secret V2FC_RUNNER_TOKEN au lieu d'un JWT.
+RUNNER_USER_ID = uuid.UUID(int=0)
+
+
+def _runner_user() -> User:
+    return User(id=RUNNER_USER_ID, email="runner@v2fc", password_hash="",
+                role="operator", is_active=True)
+
+
 async def get_current_user(token: str = Depends(_oauth2_scheme),
                            db: AsyncSession = Depends(get_db)) -> User:
+    runner_token = get_settings().runner_token
+    if runner_token and hmac.compare_digest(token.encode(), runner_token.encode()):
+        return _runner_user()
     payload = _decode_token(token)
     try:
         user_id = uuid.UUID(payload["sub"])
@@ -96,6 +110,14 @@ def require_role(minimum: str):
                                 detail=f"rôle « {minimum} » ou supérieur requis")
         return user
     return _dep
+
+
+async def require_runner(user: User = Depends(get_current_user)) -> User:
+    """Réservé au service runner (seul à recevoir des identifiants source)."""
+    if user.id != RUNNER_USER_ID:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="réservé au service runner")
+    return user
 
 
 # --------------------------------------------------------------------------

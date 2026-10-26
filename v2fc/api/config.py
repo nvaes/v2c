@@ -24,6 +24,12 @@ class Settings:
     # d'environnement ou coffre) »). 32 octets, encodés en base64.
     kek_b64: str = os.environ.get("V2FC_KEK", "")
 
+    # Secret partagé avec le service `runner` (tools/v2fc_runner.py), qui
+    # exécute les rounds sans intervention. Vide = runner désactivé.
+    runner_token: str = os.environ.get("V2FC_RUNNER_TOKEN", "")
+    # Intervalle entre deux deltas automatiques d'un job synchronisé.
+    delta_interval_min: int = int(os.environ.get("V2FC_DELTA_INTERVAL_MIN", "60"))
+
     cors_origins: list[str] = [
         o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
         if o.strip()

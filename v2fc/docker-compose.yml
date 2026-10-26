@@ -64,8 +64,29 @@ services:
       JWT_SECRET: ${JWT_SECRET:?voir .env.example}
       V2FC_KEK: ${V2FC_KEK:?voir .env.example}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      V2FC_RUNNER_TOKEN: ${V2FC_RUNNER_TOKEN:-}
+      V2FC_DELTA_INTERVAL_MIN: ${V2FC_DELTA_INTERVAL_MIN:-60}
     ports:
       - "127.0.0.1:8000:8000"
+
+  # Exécution automatique des rounds (tools/v2fc_runner.py). Doit tourner
+  # sur la VM relais elle-même : les volumes FusionCompute y sont attachés et
+  # écrits via /dev (d'où privileged). Le VDDK est monté, jamais embarqué.
+  runner:
+    build:
+      context: .
+    depends_on:
+      - api
+    privileged: true
+    environment:
+      V2FC_API_URL: http://api:8000
+      V2FC_RUNNER_TOKEN: ${V2FC_RUNNER_TOKEN:-}
+    command: ["python3", "/work/tools/v2fc_runner.py"]
+    volumes:
+      - ../vmware-vix-disklib-distrib:/opt/vddk:ro
+      - /dev:/dev
+      - v2fc-runner-state:/var/lib/v2fc/jobs
+    restart: unless-stopped
 
   web:
     build:
@@ -87,3 +108,4 @@ services:
 volumes:
   v2fc-postgres-data:
   v2fc-redis-data:
+  v2fc-runner-state:

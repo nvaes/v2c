@@ -195,10 +195,17 @@ def cmd_sync(args, stats: dict | None = None) -> int:
     target_dir = Path(args.target_dir)
     if not target_dir.is_dir():
         sys.exit(f"{target_dir} n'est pas un répertoire")
+    # {device_key: (chemin du volume, identifiant de signature)} : volumes
+    # FusionCompute attachés au relais (job-run). Absent = fichiers
+    # disk-<key>.raw dans target_dir (CLI manuelle, POC).
+    volumes = getattr(args, "volumes", None)
 
     state = State(Path(args.state))
     seed = args.round == "seed"
-    mode = Mode.SEED if seed else Mode.DELTA
+    # Mode.SEED saute les zones nulles en supposant un volume neuf. Faux pour
+    # un re-seed (CBT invalidé) ou la reprise d'un seed multi-disque : le
+    # volume contient déjà des données, les zéros doivent être écrits.
+    mode = Mode.SEED if seed and state.data["round"] == 0 else Mode.DELTA
 
     vddk.init(distrib, require=args.require.split(",") if args.require else None)
 
@@ -277,11 +284,19 @@ def cmd_sync(args, stats: dict | None = None) -> int:
                           f"{planned / 2**20:,.0f} Mio "
                           f"({100 * planned / disk.capacity_bytes:.2f} %)")
 
-                    volume = target_dir / f"disk-{disk.device_key}.raw"
+                    if volumes:
+                        if disk.device_key not in volumes:
+                            sys.exit(f"{disk.label} : aucun volume cible provisionné "
+                                     f"(disque {disk.device_key})")
+                        volume_path, signature_id = volumes[disk.device_key]
+                        volume = Path(volume_path)
+                    else:
+                        volume = target_dir / f"disk-{disk.device_key}.raw"
+                        signature_id = volume.name
                     if not volume.exists():
                         sys.exit(f"volume cible absent : {volume}. Le provisionner "
                                  f"et y déposer la signature avant le cycle.")
-                    uuid = st["volume_uuid"] or volume.name
+                    uuid = st["volume_uuid"] or signature_id
 
                     with conn.open(disk.file_name) as src, \
                             VolumeWriter(str(volume), disk.capacity_bytes, mode,
@@ -397,6 +412,30 @@ class _ApiLogHandler(logging.Handler):
             pass
 
 
+def _prepare_relay_volumes(volumes: dict, wait_s: float = 60.0) -> None:
+    """
+    Avant un seed : attend que chaque volume attaché au relais apparaisse
+    (udev), puis y dépose la signature (§7.2) si elle manque. Le chemin
+    vient de l'UUID du volume (fusioncompute.guest_disk_path) : c'est bien
+    le volume créé pour ce disque, pas un disque du relais lui-même.
+    """
+    for path, signature_id in volumes.values():
+        deadline = time.monotonic() + wait_s
+        while not os.path.exists(path):
+            if time.monotonic() > deadline:
+                sys.exit(f"volume {signature_id} introuvable sur le relais ({path}) : "
+                         f"est-il bien attaché à cette VM ?")
+            time.sleep(2)
+        expected = VolumeWriter._signature_bytes(signature_id)
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(fh.tell() - len(expected))
+            present = fh.read(len(expected)) == expected
+        if not present:
+            VolumeWriter.stamp_signature(path, signature_id)
+            log.info("signature déposée sur %s (volume %s)", path, signature_id)
+
+
 def cmd_job_run(args) -> int:
     token = os.environ.get("V2FC_API_TOKEN")
     if not token:
@@ -420,6 +459,9 @@ def cmd_job_run(args) -> int:
     target_dir.mkdir(parents=True, exist_ok=True)
     state_path = target_dir / "state.json"
 
+    volumes = {d["device_key"]: (d["tgt_dev_path"], d["volume_id"])
+               for d in ctx.get("disks", []) if d.get("tgt_dev_path")}
+
     sync_args = argparse.Namespace(
         host=ctx["src_host"], user=args.user or os.environ.get("V2FC_VC_USER"),
         port=ctx["src_port"], insecure=not ctx["src_verify_tls"],
@@ -427,11 +469,14 @@ def cmd_job_run(args) -> int:
         round="seed" if ctx["round_kind"] == "SEED" else "delta",
         target_dir=str(target_dir), state=str(state_path),
         chunk=args.chunk, transport=args.transport, require=args.require,
-        quiesce=args.quiesce or ctx["round_kind"] == "FINAL")
+        quiesce=args.quiesce or ctx["round_kind"] == "FINAL",
+        volumes=volumes or None)
 
     stats: dict = {}
     status_, error_msg, rc = "failed", None, 1
     try:
+        if volumes and ctx["round_kind"] == "SEED":
+            _prepare_relay_volumes(volumes)
         rc = cmd_sync(sync_args, stats=stats)
         status_ = {0: "success", 2: "cbt_invalidated"}.get(rc, "failed")
     except SystemExit as exc:

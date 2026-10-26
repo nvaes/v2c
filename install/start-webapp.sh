@@ -36,6 +36,13 @@ echo
 echo "=== démarrage api + web ==="
 docker compose up -d api web
 
+# Runner (rounds automatiques) : seulement sur la VM relais, VDDK requis
+# dans ../vmware-vix-disklib-distrib (voir install/README.md).
+if [ -d ../vmware-vix-disklib-distrib/lib64 ]; then
+  echo "=== démarrage runner ==="
+  docker compose up -d --build runner
+fi
+
 echo
 echo "Stack lancée. Vérifier l'API :"
 echo "  curl -s http://localhost:8000/api/v1/health"

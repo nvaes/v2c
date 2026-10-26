@@ -22,6 +22,20 @@ const STATE_LABELS: Record<string, string> = {
   ROLLED_BACK: "revenu en arrière", FAILED: "échec",
 };
 
+// Jobs avec relais : rounds exécutés par le service runner (seed après le
+// provisioning, delta périodique, delta final après la bascule).
+function autoRoundStatus(job: JobOut): string {
+  const last = job.rounds[job.rounds.length - 1];
+  if (last && last.status === "running") {
+    return `round ${last.kind} n°${last.round_no} en cours (automatique, démarré à ` +
+      `${new Date(last.started_at + "Z").toLocaleTimeString()})`;
+  }
+  if (job.state === "SEEDING") return "seed en attente du runner (démarrage automatique)";
+  if (job.state === "FINAL_DELTA") return "delta final en attente du runner (démarrage automatique)";
+  if (job.state === "SYNCED") return "synchronisé — delta automatique périodique";
+  return "";
+}
+
 function jobRunCommand(job: JobOut, kind: "seed" | "delta" | "final"): string {
   return (
     `V2FC_API_TOKEN=<jeton> docker run --rm --platform linux/amd64 \\\n` +
@@ -148,10 +162,9 @@ export default function MigrationPage() {
       <h1>Migration</h1>
       <p className="muted">
         Pilote les étapes 6 à 8 du flux de migration : copie en ligne (seed), resynchronisations
-        incrémentales (delta) et bascule finale (« migrate now »). Le round de synchronisation
-        lui-même (lecture VDDK, écriture) tourne toujours dans le Data Mover, sur ton poste — cette
-        page prépare le job et affiche la commande exacte à lancer ; elle ne l'exécute pas
-        elle-même.
+        incrémentales (delta) et bascule finale (« migrate now »). Avec un relais, les rounds
+        s'exécutent automatiquement (service runner) ; sans relais (écriture locale), la page
+        affiche la commande à lancer à la main.
       </p>
       {relays.length === 0 && (
         <p className="muted">
@@ -237,7 +250,11 @@ export default function MigrationPage() {
                   </p>
                 )}
 
-                {job && ROUND_KIND_FOR_STATE[job.state] && (
+                {job && job.relay_id && autoRoundStatus(job) && (
+                  <p className="muted">{autoRoundStatus(job)}</p>
+                )}
+
+                {job && !job.relay_id && ROUND_KIND_FOR_STATE[job.state] && (
                   <div>
                     <p className="muted">
                       Lancer depuis le terminal (Docker + VDDK, comme pour la validation L1) :

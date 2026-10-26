@@ -348,3 +348,10 @@ def test_power_off_defaults_to_safe_mode(monkeypatch):
     call = next(c for c in session.calls if c["url"].endswith("/action/stop"))
     assert call["json"] == {"mode": "safe"}
 
+
+
+def test_guest_disk_path_uses_truncated_volume_uuid():
+    # Constaté sur le VRM réel (26/10/2026) : série virtio = 20 premiers caractères.
+    from datamover.fusioncompute import guest_disk_path
+    assert guest_disk_path("61172379-913f-4377-a541-eaec968d7e55") == \
+        "/dev/disk/by-id/virtio-61172379-913f-4377-a"

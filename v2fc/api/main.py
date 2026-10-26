@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import auth, endpoints, jobs, plans, relays
+from .routers import auth, endpoints, jobs, plans, relays, runner
 
 app = FastAPI(title="V2FC — orchestrateur", version="0.1.0")
 
@@ -29,6 +29,7 @@ app.include_router(endpoints.router)
 app.include_router(plans.router)
 app.include_router(relays.router)
 app.include_router(jobs.router)
+app.include_router(runner.router)
 
 
 @app.get("/api/v1/health")
