@@ -27,6 +27,7 @@ maintenance) dans [`docs/dev/JOURNAL.md`](docs/dev/JOURNAL.md).
 ├── docs/
 │   ├── GUIDE-UTILISATEUR.md guide d'utilisation
 │   └── dev/JOURNAL.md       historique technique, constats sur VMware/FusionCompute réels
+├── install.sh           installation complète en une commande
 ├── install/             scripts d'installation + README détaillé
 │   ├── install-docker.sh    installe Docker + compose (Linux, selon la distribution)
 │   ├── check-prereqs.sh     diagnostic, ne modifie rien
@@ -68,29 +69,42 @@ maintenance) dans [`docs/dev/JOURNAL.md`](docs/dev/JOURNAL.md).
   construite et lancée en `--platform linux/amd64` (Rosetta).
 - Ports libres en local : `5432`, `6379`, `8000`, `5173`.
 
-## Installation rapide
+## Installation en une commande
+
+Sur la VM relais (Linux x86-64, dans le cluster FusionCompute), en root :
 
 ```bash
-git clone git@github.com:nvaes/v2c.git v2fc-deploy
-cd v2fc-deploy
+git clone git@github.com:nvaes/v2c.git
+cd v2c
+sudo ./install.sh --vddk /chemin/VMware-vix-disklib-8.0.3-23950268.x86_64.tar.gz \
+                  --admin-email vous@exemple.com
+```
 
-# 0. Docker Engine + docker compose, selon la distribution Linux
-#    (sans effet s'ils sont déjà installés)
-sudo ./install/install-docker.sh
+`install.sh` enchaîne : VDDK (dossier ou archive), Docker selon la
+distribution (`install/install-docker.sh`), diagnostic, secrets
+(`v2fc/.env`), accès réseau à l'interface (`--host`, défaut : première IP
+du serveur), build et démarrage de tous les services (runner compris), puis
+le premier administrateur (mot de passe demandé au clavier). Il peut être
+relancé sans risque : ce qui est déjà fait est conservé. `./install.sh
+--help` pour les options.
 
-# 1. Diagnostic (ne modifie rien)
-./install/check-prereqs.sh
+À la fin, l'adresse de l'interface s'affiche (`http://<ip>:5173`) : y créer
+les environnements vCenter et FusionCompute (voir le
+[guide utilisateur](docs/GUIDE-UTILISATEUR.md)) ; la VM relais
+s'enregistre seule.
 
-# 2. Configuration : crée v2fc/.env et génère JWT_SECRET / V2FC_KEK
-./install/setup-env.sh
-#    Si l'interface n'est pas ouverte via http://localhost:5173,
-#    adapter CORS_ORIGINS dans v2fc/.env (ex. http://<ip-vm>:5173)
+### Étape par étape
 
-# 3. Socle web : build + démarrage de postgres, redis, api, web
-./install/start-webapp.sh
+Les mêmes étapes, à la main :
 
-# 4. Premier compte administrateur (mot de passe demandé interactivement)
-cd v2fc && docker compose exec api python3 -m api.seed_admin --email <ton-email>
+```bash
+sudo ./install/install-docker.sh   # Docker + compose selon la distribution
+./install/check-prereqs.sh         # diagnostic, ne modifie rien
+./install/setup-env.sh             # crée v2fc/.env et génère les secrets
+#  accès depuis un autre poste : dans v2fc/.env,
+#  CORS_ORIGINS=http://<ip-vm>:5173 et V2FC_WEB_BIND=0.0.0.0
+./install/start-webapp.sh          # build + démarrage (runner si le VDDK est présent)
+cd v2fc && docker compose exec api python3 -m api.seed_admin --email <votre-email>
 ```
 
 Vérification :

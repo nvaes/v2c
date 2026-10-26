@@ -1796,3 +1796,16 @@ Debian 12, Rocky Linux 9, AlmaLinux 8, Fedora 41 (installation complète,
 démarrage du service sauté faute de systemd) ; et sur le serveur relais
 (déjà installé : rien de réinstallé). Non testé : SLES/openSUSE.
 `check-prereqs.sh` renvoie vers ce script sous Linux.
+
+
+## 31. Installation en une commande : `install.sh` (26/10/2026)
+
+`install.sh` à la racine enchaîne VDDK (`--vddk` dossier ou archive),
+`install/install-docker.sh`, `install/check-prereqs.sh`,
+`install/setup-env.sh`, l'accès réseau dans `v2fc/.env` (`CORS_ORIGINS`,
+`V2FC_WEB_BIND` selon `--host`, défaut première IP du serveur),
+`install/start-webapp.sh` (runner compris) avec attente de l'API, puis le
+premier administrateur (`--admin-email`, mot de passe au clavier ; sauté si
+un compte existe). Relançable. Écrit après une désinstallation complète du
+serveur relais (application, données et Docker) pour valider une
+installation depuis zéro.

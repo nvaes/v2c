@@ -14,6 +14,32 @@ modification du socle web (`v2fc/docker-compose.yml`, `.env.example`,
 Dockerfiles) ou de la CLI du Data Mover qui changerait une commande
 ci-dessous doit être répercutée ici.
 
+## Installation en une commande
+
+```bash
+sudo ./install.sh --vddk /chemin/VMware-vix-disklib-*.tar.gz --admin-email vous@exemple.com
+```
+
+Le script `install.sh`, à la racine du dépôt, enchaîne toutes les étapes
+décrites dans ce document :
+
+1. **VDDK** : copie du dossier ou décompression de l'archive passée en
+   `--vddk`. Sans VDDK, l'interface s'installe mais pas le runner.
+2. **Docker** : `install/install-docker.sh`.
+3. **Diagnostic** : `install/check-prereqs.sh`.
+4. **Configuration** : `install/setup-env.sh` (secrets), puis l'accès
+   réseau dans `v2fc/.env` : `CORS_ORIGINS` et `V2FC_WEB_BIND`, d'après
+   `--host` (défaut : première IP du serveur ; `--host localhost` pour un
+   accès local seulement). Le fichier passe en droits 600.
+5. **Build et démarrage** : `install/start-webapp.sh`, runner compris, puis
+   attente de l'API.
+6. **Premier administrateur** : `--admin-email`, mot de passe demandé au
+   clavier. Étape sautée si un compte existe déjà ; sans option, la
+   commande à lancer est affichée.
+
+Relançable : un `.env` existant, Docker déjà installé ou un compte déjà
+créé sont conservés. Les sections suivantes détaillent chaque étape.
+
 ## Vue d'ensemble
 
 Deux composants distincts, livrés et installés séparément :
@@ -271,6 +297,7 @@ directement sur les volumes FusionCompute attachés à cette VM
 ## Contenu de ce dossier
 
 ```
+../install.sh        installation complète en une commande (enchaîne les scripts ci-dessous)
 install-docker.sh    installe Docker + compose selon la distribution Linux
 check-prereqs.sh     diagnostic (Docker, VDDK, .env) — ne modifie rien
 setup-env.sh         crée v2fc/.env et génère les secrets
