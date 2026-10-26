@@ -10,10 +10,12 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import vsphere_bridge
 from ..db import get_db
-from ..models import Credential, Endpoint, Job, Plan, PlanVm, User
+from ..models import Credential, Endpoint, Job, JobDisk, Plan, PlanVm, Relay, SyncRound, User
 from ..schemas import (PlanCreate, PlanOut, PlanPreflightResponse, PlanTargetUpdate,
                        PlanVmMappingUpdate, SourceNic)
 from ..security import decrypt_credential_password, require_role
+from .jobs import _connection_args
+from datamover import fusioncompute as fc
 
 router = APIRouter(prefix="/api/v1/plans", tags=["plans"])
 
@@ -179,34 +181,103 @@ async def set_plan_vm_mapping(plan_id: uuid.UUID, plan_vm_id: uuid.UUID,
 
 
 @router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-async def delete_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+async def delete_plan(plan_id: uuid.UUID, with_jobs: bool = False, delete_volumes: bool = True,
+                      db: AsyncSession = Depends(get_db),
                       _user: User = Depends(require_role("operator"))) -> None:
     """
-    Symétrique à DELETE /endpoints/{id} (HANDOFF.md, 17/09/2026) : Nicolas a
-    demandé un moyen de retirer un plan de migration (créé par erreur, ou
-    plus utile) sans passer par la base. Les VM du plan disparaissent avec
-    (cascade ORM `Plan.vms` + FK `plan_vms.plan_id` en `ON DELETE CASCADE`,
-    voir `api/models.py`) — rien à faire de spécial pour elles. Refuse en
-    revanche si un job d'exécution référence encore ce plan, plutôt que de
-    laisser remonter une contrainte de clé étrangère en 500 nu : `jobs.plan_id`
-    n'a pas de `ON DELETE CASCADE` (§8.1), volontairement, pour ne jamais
-    perdre un historique d'exécution en silence. Aucun job n'est créé par
-    l'API pour l'instant (L2 pas encore écrit) : ce garde-fou ne se
-    déclenche donc pas en pratique aujourd'hui, mais protège dès que L2
-    existera — même discipline que pour les endpoints.
+    Supprime un plan et ses VM (cascade `plan_vms.plan_id`).
+
+    Sans `with_jobs`, refuse (409) si des jobs référencent le plan :
+    `jobs.plan_id` n'a volontairement pas de `ON DELETE CASCADE` (§8.1), pour
+    ne jamais perdre un historique d'exécution en silence.
+
+    Avec `with_jobs=true` (bouton « Supprimer » de la page Plans, 26/10/2026) :
+    supprime aussi les jobs et leur historique, sauf si l'un d'eux est en
+    pleine copie ou bascule (409 : attendre la fin, ou faire un rollback).
+    `delete_volumes` (défaut oui) détache du relais et supprime sur
+    FusionCompute les volumes des migrations non terminées — copies
+    partielles qui occuperaient sinon des emplacements disque du relais.
+    Les volumes d'une migration terminée (CUTOVER_DONE) appartiennent à la
+    VM migrée : jamais touchés.
     """
-    plan = await db.get(Plan, plan_id)
+    # VM chargées d'avance : la cascade ORM Plan.vms ne peut pas les charger
+    # paresseusement en asynchrone au moment du delete.
+    plan = (await db.execute(select(Plan).where(Plan.id == plan_id)
+                             .options(selectinload(Plan.vms)))).scalar_one_or_none()
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="plan introuvable")
 
-    result = await db.execute(select(Job.id).where(Job.plan_id == plan_id))
-    referencing = result.scalars().all()
-    if referencing:
+    jobs = (await db.execute(select(Job).where(Job.plan_id == plan_id))).scalars().all()
+    if jobs and not with_jobs:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"ce plan est encore référencé par {len(referencing)} job(s) "
-                   f"d'exécution — impossible de le supprimer sans perdre leur historique")
+            detail=f"ce plan est encore référencé par {len(jobs)} job(s) d'exécution — "
+                   f"les supprimer avec le plan (with_jobs=true) ou les supprimer d'abord")
 
+    running = {r.job_id for r in (await db.execute(
+        select(SyncRound).where(SyncRound.job_id.in_([j.id for j in jobs]),
+                                SyncRound.status == "running"))).scalars()}
+    busy = [j for j in jobs if j.id in running or j.state in _BUSY_STATES]
+    if busy:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="copie ou bascule en cours pour "
+                   + ", ".join(f"{j.src_vm_name} ({j.state})" for j in busy)
+                   + " — attendre la fin du round ou faire un rollback avant de supprimer")
+
+    if delete_volumes:
+        for job in jobs:
+            if job.state == "CUTOVER_DONE":
+                continue
+            try:
+                await _release_volumes(db, job)
+            except fc.FusionComputeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"suppression des volumes de {job.src_vm_name} sur FusionCompute "
+                           f"impossible : {exc} — rien n'a été supprimé côté application") from exc
+
+    for job in jobs:
+        await db.delete(job)
+    await db.flush()
     await db.delete(plan)
     await db.commit()
+
+
+# Copie ou bascule en cours : un job dans ces états ne se supprime pas.
+_BUSY_STATES = {"PROVISIONING", "CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA",
+                "FINALIZING", "ROLLBACK"}
+
+
+async def _release_volumes(db: AsyncSession, job: Job) -> None:
+    """Détache du relais puis supprime les volumes FusionCompute d'un job."""
+    disks = [d for d in (await db.execute(
+        select(JobDisk).where(JobDisk.job_id == job.id))).scalars() if d.tgt_volume_uri]
+    if not disks:
+        return
+    target = await db.get(Endpoint, job.target_id)
+    args = await _connection_args(db, target)
+    relay = await db.get(Relay, job.relay_id) if job.relay_id else None
+
+    def _release() -> None:
+        with fc.FusionComputeClient(args["host"], args["user"], args["password"],
+                                    port=target.port or fc.DEFAULT_API_PORT,
+                                    verify=target.verify_tls) as client:
+            relay_vm_id = relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1] if relay else None
+            on_relay = ({d["volumeUrn"] for d in client.get_vm(relay_vm_id)["vmConfig"]["disks"]}
+                        if relay_vm_id else set())
+            for d in disks:
+                vol_id = d.tgt_volume_uri.rstrip("/").rsplit("/", 1)[-1]
+                urn = f"urn:sites:{client.site.id}:volumes:{vol_id}"
+                try:
+                    client.get_volume(vol_id)
+                except fc.FusionComputeError:
+                    continue                      # déjà supprimé
+                if urn in on_relay:
+                    client.wait_task(client.detach_volume(relay_vm_id, vol_urn=urn)["taskUri"])
+                task = client.delete_volume(vol_id).get("taskUri")
+                if task:
+                    client.wait_task(task)
+
+    await run_in_threadpool(_release)
 

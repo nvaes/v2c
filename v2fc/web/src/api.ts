@@ -65,7 +65,10 @@ export const api = {
 
   listPlans: () => request<PlanOut[]>("/plans"),
   getPlan: (id: string) => request<PlanOut>(`/plans/${id}`),
-  deletePlan: (id: string) => request<void>(`/plans/${id}`, { method: "DELETE" }),
+  // withJobs : supprime aussi les jobs (et les volumes FusionCompute des
+  // migrations non terminées).
+  deletePlan: (id: string, withJobs = false) =>
+    request<void>(`/plans/${id}${withJobs ? "?with_jobs=true" : ""}`, { method: "DELETE" }),
   createPlan: (body: PlanCreate) =>
     request<PlanOut>("/plans", { method: "POST", body: JSON.stringify(body) }),
   planPreflight: (id: string) =>

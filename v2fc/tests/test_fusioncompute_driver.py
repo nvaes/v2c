@@ -409,3 +409,11 @@ def test_pick_os_version_falls_back_to_other():
     from datamover.fusioncompute import pick_os_version
     assert pick_os_version(_OS_VERSIONS, "FreeBSD 13 (64-bit)", "freebsd13_64Guest")[:2] \
         == ("Linux", 302)
+
+
+def test_delete_volume_returns_task(monkeypatch):
+    session = FakeSession()
+    client = make_client(monkeypatch, session)
+    session.on("DELETE", "/sites/05C9108A/volumes/70",
+               FakeResponse(json_data={"taskUri": "/service/sites/05C9108A/tasks/1"}))
+    assert client.delete_volume("70")["taskUri"].endswith("/tasks/1")

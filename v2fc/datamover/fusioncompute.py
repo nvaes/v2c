@@ -269,6 +269,18 @@ class FusionComputeClient:
                 f"POST {path} -> {resp.status_code} : {_error_detail(resp)}")
         return resp.json() if resp.content else {}
 
+    def _delete(self, path: str) -> dict:
+        url = f"{self.base_url}{path}"
+        try:
+            resp = self._session.delete(url, headers=self._auth_headers(),
+                                        verify=self.verify, timeout=self.timeout)
+        except requests.RequestException as exc:
+            raise FusionComputeError(f"DELETE {path} impossible : {exc}") from exc
+        if resp.status_code not in (200, 202):
+            raise FusionComputeError(
+                f"DELETE {path} -> {resp.status_code} : {_error_detail(resp)}")
+        return resp.json() if resp.content else {}
+
     # -- sites ------------------------------------------------------------
     def list_sites(self) -> list[FcSite]:
         data = self._get("/sites")
@@ -459,6 +471,11 @@ class FusionComputeClient:
             vms.extend(page)
             if not page or len(vms) >= data.get("total", 0):
                 return vms
+
+    def delete_volume(self, vol_id: str) -> dict:
+        """`DELETE <vol_uri>/<vol_id>` — asynchrone (`taskUri`), le volume doit
+        être détaché. Vérifié sur le VRM réel le 26/10/2026 (volume de test)."""
+        return self._delete(f"/sites/{self.site.id}/volumes/{vol_id}")
 
     def get_volume(self, vol_id: str) -> dict:
         """`GET <vol_uri>/<vol_id>` — notamment `uuid`, voir `guest_disk_path`."""

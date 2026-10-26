@@ -1722,3 +1722,24 @@ carte est créée avec `"mac": <MAC source>`. Vérifié sur le VRM réel : une V
 de test créée avec `00:50:56:3f:00:01` a bien reçu cette MAC (VM supprimée
 ensuite). Risque signalé dans l'interface : ne pas rallumer la source
 (rollback) en même temps que la cible sur le même réseau (MAC en double).
+
+## 27. Suppression d'un plan avec ses jobs (26/10/2026)
+
+Le bouton « Supprimer » de la page Plans échouait (409) dès qu'un job
+existait. `DELETE /plans/{id}?with_jobs=true` (envoyé par le bouton quand le
+plan a des jobs, après une confirmation qui les énumère) :
+
+- refuse (409) si un job copie (round « running ») ou bascule
+  (PROVISIONING, CUTOVER_PENDING, QUIESCING, FINAL_DELTA, FINALIZING,
+  ROLLBACK) : attendre la fin ou faire un rollback ;
+- `delete_volumes` (défaut oui) : pour chaque job non terminé, détache du
+  relais et supprime sur FusionCompute ses volumes (copies partielles qui
+  occupent des emplacements virtio du relais, 25 au plus) ; si FusionCompute
+  refuse, 502 et rien n'est supprimé côté application ;
+- les volumes d'un job CUTOVER_DONE (disques de la VM migrée) ne sont jamais
+  touchés ;
+- supprime jobs, historique (cascade FK) puis le plan.
+
+Testé sur un plan temporaire (suppression du plan et de ses VM). Non testé
+en réel : le refus sur job actif et la suppression des volumes (même appels
+FusionCompute que ceux vérifiés au §21 sur un volume de test).

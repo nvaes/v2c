@@ -40,14 +40,27 @@ export default function PlansPage() {
   }
 
   async function removePlan(plan: PlanOut) {
-    if (!window.confirm(`Supprimer le plan « ${plan.name} » (${plan.vms.length} VM) ?`)) return;
     setDeletingId(plan.id);
     setError(null);
     try {
-      await api.deletePlan(plan.id);
+      const jobs = (await api.listJobs()).filter((j) => j.plan_id === plan.id);
+      const unfinished = jobs.filter((j) => j.state !== "CUTOVER_DONE");
+      let message = `Supprimer le plan « ${plan.name} » (${plan.vms.length} VM) ?`;
+      if (jobs.length > 0) {
+        message += `\n\n${jobs.length} job(s) de migration et leur historique seront aussi supprimés.`;
+      }
+      if (unfinished.length > 0) {
+        message += `\nLes volumes déjà copiés sur FusionCompute pour ${unfinished
+          .map((j) => j.src_vm_name).join(", ")} (migration non terminée) seront supprimés.`;
+      }
+      if (jobs.length > unfinished.length) {
+        message += "\nLes VM déjà migrées restent intactes sur FusionCompute.";
+      }
+      if (!window.confirm(message)) return;
+      await api.deletePlan(plan.id, jobs.length > 0);
       setPlans((prev) => prev.filter((p) => p.id !== plan.id));
     } catch (err) {
-      // 409 attendu si un job référence encore ce plan — le message du
+      // 409 si une copie ou une bascule est en cours — le message du
       // backend l'explique déjà, pas la peine de le reformuler.
       setError(err instanceof Error ? err.message : String(err));
     } finally {
