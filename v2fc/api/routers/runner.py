@@ -7,6 +7,9 @@ Le runner demande ici quoi faire, puis lance `job-run` lui-même. Seul un
 job avec relais et volumes FusionCompute attachés est pris en charge : sans
 relais, un round écrirait en local (mode POC) et reste manuel.
 
+Le runner s'enregistre aussi lui-même comme relais (`POST /register`) :
+l'UUID matériel de sa machine est l'`uuid` de la VM dans FusionCompute.
+
 Exception assumée au §13 (« jamais de secret en sortie ») : le runner a
 besoin du mot de passe source pour VDDK. Il ne le reçoit que sur une route
 réservée à son secret V2FC_RUNNER_TOKEN, jamais avec un JWT d'utilisateur.
@@ -19,12 +22,15 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import Credential, Endpoint, Job, JobDisk, SyncRound, User
-from ..schemas import RunnerSourceCredentials, RunnerWorkItem
+from ..models import Credential, Endpoint, Job, JobDisk, Relay, SyncRound, User
+from ..schemas import RelayOut, RunnerRegister, RunnerSourceCredentials, RunnerWorkItem
 from ..security import decrypt_credential_password, require_runner
+from .jobs import _connection_args
+from datamover import fusioncompute as fc
 
 router = APIRouter(prefix="/api/v1/runner", tags=["runner"])
 
@@ -72,3 +78,57 @@ async def get_source_credentials(job_id: uuid.UUID, db: AsyncSession = Depends(g
     source = await db.get(Endpoint, job.source_id)
     cred = await db.get(Credential, source.credential_id)
     return {"user": cred.username, "password": decrypt_credential_password(cred)}
+
+
+def _find_vm_by_uuid(client: fc.FusionComputeClient, relays: list[Relay],
+                     system_uuid: str) -> dict | None:
+    # Relais déjà connus d'abord (un appel chacun), sinon scan du site.
+    for relay in relays:
+        try:
+            vm = client.get_vm(relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1])
+        except fc.FusionComputeError:
+            continue
+        if vm.get("uuid", "").lower() == system_uuid:
+            return vm
+    return next((vm for vm in client.list_vms()
+                 if vm.get("uuid", "").lower() == system_uuid), None)
+
+
+@router.post("/register", response_model=RelayOut | None)
+async def register_self(body: RunnerRegister, db: AsyncSession = Depends(get_db),
+                        _runner: User = Depends(require_runner)) -> Relay | None:
+    """
+    Cherche la VM du runner dans chaque endpoint FusionCompute et l'enregistre
+    comme relais (ou le marque ONLINE s'il l'est déjà). Rien trouvé : None —
+    runner hors FusionCompute, ou endpoint pas encore créé (le runner réessaie).
+    """
+    system_uuid = body.system_uuid.lower()
+    targets = (await db.execute(
+        select(Endpoint).where(Endpoint.kind == "fusioncompute"))).scalars().all()
+    for target in targets:
+        relays = (await db.execute(
+            select(Relay).where(Relay.target_id == target.id))).scalars().all()
+        args = await _connection_args(db, target)
+
+        def _lookup() -> dict | None:
+            with fc.FusionComputeClient(args["host"], args["user"], args["password"],
+                                        port=target.port or fc.DEFAULT_API_PORT,
+                                        verify=target.verify_tls) as client:
+                return _find_vm_by_uuid(client, relays, system_uuid)
+        try:
+            vm = await run_in_threadpool(_lookup)
+        except fc.FusionComputeError:
+            continue
+        if vm is None:
+            continue
+
+        relay = next((r for r in relays if r.fc_vm_uri == vm["uri"]), None)
+        if relay is None:
+            relay = Relay(target_id=target.id, fc_vm_uri=vm["uri"], max_slots=12,
+                          agent_url="non utilisé — relais colocalisé (D7)")
+            db.add(relay)
+        relay.status = "ONLINE"
+        await db.commit()
+        await db.refresh(relay)
+        return relay
+    return None

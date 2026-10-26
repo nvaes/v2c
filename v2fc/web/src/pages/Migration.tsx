@@ -198,10 +198,9 @@ export default function MigrationPage() {
       </p>
       {relays.length === 0 && (
         <p className="muted">
-          Aucune VM relais enregistrée — le provisioning FusionCompute réel (création/attachement
-          de volume) sera sauté pour les nouveaux jobs, qui écriront en local (mode validation,
-          identique au POC du 17/09/2026). Voir ARCHITECTURE.md §7.1 pour en enregistrer une une
-          fois déployée dans FusionCompute.
+          Aucune VM relais enregistrée. Le service runner enregistre automatiquement la VM sur
+          laquelle il tourne dès qu'il la trouve dans un environnement FusionCompute (vérification
+          toutes les 10 min). Sans relais, un job écrit en local (mode validation).
         </p>
       )}
 

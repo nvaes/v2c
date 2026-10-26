@@ -331,6 +331,12 @@ class RunnerWorkItem(BaseModel):
     round: str
 
 
+class RunnerRegister(BaseModel):
+    # /sys/class/dmi/id/product_uuid de la machine du runner : FusionCompute
+    # le présente comme `uuid` de la VM (constaté le 26/10/2026).
+    system_uuid: str = Field(min_length=36, max_length=36)
+
+
 class RunnerSourceCredentials(BaseModel):
     user: str
     password: str

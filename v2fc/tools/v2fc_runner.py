@@ -7,6 +7,8 @@ Tourne dans le service `runner` de docker-compose.yml, sur la VM relais
 elle-même (accès à /dev pour les volumes FusionCompute attachés) avec le
 VDDK monté. En boucle :
 
+  0. s'enregistre comme relais au démarrage puis toutes les 10 min : l'API
+     retrouve cette VM dans FusionCompute par son UUID matériel ;
   1. demande à l'API ce qu'il y a à faire (`GET /api/v1/runner/work`) :
      seed après provisioning, delta périodique, delta final après bascule ;
   2. pour chaque round, récupère les identifiants source et lance
@@ -40,6 +42,9 @@ TRANSPORT = os.environ.get("V2FC_RUNNER_TRANSPORT", "nbdssl")
 # serait relancé en boucle — vu le 26/10/2026, 4 seeds de suite).
 COOLDOWN_S = float(os.environ.get("V2FC_RUNNER_COOLDOWN_S", "300"))
 
+REGISTER_EVERY_S = 600
+SYSTEM_UUID_PATH = Path("/sys/class/dmi/id/product_uuid")
+
 SOURCE_CLI = Path(__file__).with_name("v2fc_source.py")
 
 
@@ -48,6 +53,30 @@ def _get(path: str) -> requests.Response:
                         headers={"Authorization": f"Bearer {TOKEN}"})
     resp.raise_for_status()
     return resp
+
+
+def _register() -> bool:
+    """False si l'API n'a pas répondu (démarrage) : nouvel essai au tour suivant."""
+    try:
+        system_uuid = SYSTEM_UUID_PATH.read_text().strip()
+    except OSError as exc:
+        log.warning("UUID matériel illisible (%s) : relais non enregistré", exc)
+        return True
+    try:
+        resp = requests.post(f"{API_URL}/api/v1/runner/register", timeout=120,
+                             json={"system_uuid": system_uuid},
+                             headers={"Authorization": f"Bearer {TOKEN}"})
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        log.warning("enregistrement du relais impossible : %s", exc)
+        return False
+    relay = resp.json()
+    if relay:
+        log.info("relais enregistré : %s", relay["fc_vm_uri"])
+    else:
+        log.warning("VM %s introuvable dans les endpoints FusionCompute — "
+                    "nouvel essai dans %d min", system_uuid, REGISTER_EVERY_S // 60)
+    return True
 
 
 def _start_round(job_id: str, round_kind: str) -> subprocess.Popen:
@@ -70,10 +99,15 @@ def main() -> int:
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
     running: dict[str, tuple[str, subprocess.Popen]] = {}
     finished_at: dict[str, float] = {}
+    registered_at = -REGISTER_EVERY_S
 
     log.info("runner démarré — API %s, %d round(s) en parallèle au plus",
              API_URL, MAX_PARALLEL)
     while True:
+        if time.monotonic() - registered_at >= REGISTER_EVERY_S:
+            if _register():
+                registered_at = time.monotonic()
+
         for job_id, (round_kind, proc) in list(running.items()):
             rc = proc.poll()
             if rc is not None:

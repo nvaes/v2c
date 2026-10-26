@@ -96,12 +96,26 @@ def guest_disk_path(volume_uuid: str) -> str:
     return f"/dev/disk/by-id/virtio-{volume_uuid[:20]}"
 
 
+# Codes VRM rencontrés en installation réelle (26/10/2026), traduits : le
+# libellé d'origine est en chinois (`errorDes`).
+_KNOWN_ERRORS = {
+    "10000041": "le VRM exige un changement du mot de passe de ce compte avant tout "
+                "appel d'API — désactiver le changement obligatoire du mot de passe "
+                "initial dans la politique FusionCompute, puis réinitialiser le mot de "
+                "passe (install/README.md, « Compte FusionCompute de l'application »)",
+    "10100103": "nom d'utilisateur ou mot de passe incorrect",
+    "10100380": "ce compte ne peut pas utiliser l'API sur ce port : il faut un "
+                "compte de type « interconnexion d'interface »",
+}
+
+
 def _error_detail(resp: "requests.Response") -> str:
     try:
         body = resp.json()
     except ValueError:
         return (resp.text or "")[:300]
-    return str(body)
+    known = _KNOWN_ERRORS.get(str(body.get("errorCode", ""))) if isinstance(body, dict) else None
+    return f"{known} ({body})" if known else str(body)
 
 
 @dataclass
@@ -399,6 +413,17 @@ class FusionComputeClient:
         if sequence_num is not None:
             body["sequenceNum"] = sequence_num
         return self._post(f"/sites/{self.site.id}/vms/{vm_id}/action/createattachvol", body)
+
+    def list_vms(self, page_size: int = 100) -> list[dict]:
+        """`GET <vm_uri>?limit=&offset=` — toutes les VM du site, page par page."""
+        vms: list[dict] = []
+        while True:
+            data = self._get(f"/sites/{self.site.id}/vms",
+                             params={"limit": page_size, "offset": len(vms)})
+            page = data.get("vms", [])
+            vms.extend(page)
+            if not page or len(vms) >= data.get("total", 0):
+                return vms
 
     def get_volume(self, vol_id: str) -> dict:
         """`GET <vol_uri>/<vol_id>` — notamment `uuid`, voir `guest_disk_path`."""

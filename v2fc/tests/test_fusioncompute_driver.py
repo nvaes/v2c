@@ -355,3 +355,24 @@ def test_guest_disk_path_uses_truncated_volume_uuid():
     from datamover.fusioncompute import guest_disk_path
     assert guest_disk_path("61172379-913f-4377-a541-eaec968d7e55") == \
         "/dev/disk/by-id/virtio-61172379-913f-4377-a"
+
+
+def test_list_vms_pages_until_total(monkeypatch):
+    session = FakeSession()
+    client = make_client(monkeypatch, session)
+    session.on("GET", "/sites/05C9108A/vms", FakeResponse(json_data={
+        "total": 2, "vms": [{"uri": "/service/sites/05C9108A/vms/i-1", "uuid": "u"}]}))
+
+    out = client.list_vms(page_size=1)
+
+    offsets = [c["params"]["offset"] for c in session.calls if c["url"].endswith("/vms")]
+    assert offsets == [0, 1]
+    assert len(out) == 2
+
+
+def test_error_detail_translates_forced_password_change():
+    # Code vu le 26/10/2026 sur un compte d'interconnexion neuf.
+    from datamover.fusioncompute import _error_detail
+    resp = FakeResponse(status_code=400, json_data={
+        "errorCode": "10000041", "errorDes": "为保证账号口令安全，请修改密码。"})
+    assert "changement du mot de passe" in _error_detail(resp)

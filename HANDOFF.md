@@ -1647,3 +1647,20 @@ de tous les disques avant la copie (total du round connu d'emblée) ;
 `job-run` envoie `POST /jobs/{id}/rounds/{rid}/progress` toutes les 5 s
 (`bytes_planned`, `bytes_done`, stockés dans `sync_rounds` tant que le round
 tourne). La page Migration affiche barre, %, Gio, débit et temps restant.
+
+## 23. Relais détecté automatiquement + compte FusionCompute (26/10/2026)
+
+- **Auto-enregistrement du relais** : constaté sur le VRM de Nicolas,
+  `/sys/class/dmi/id/product_uuid` de la VM = champ `uuid` de la VM dans
+  FusionCompute (`DC1_MIGRATION`, `2ae09df9-…`). Le runner envoie cet UUID à
+  `POST /api/v1/runner/register` au démarrage puis toutes les 10 min ; l'API
+  vérifie d'abord les relais connus (`get_vm`), sinon parcourt les VM du site
+  (`list_vms`, paginé), et crée ou passe ONLINE le relais correspondant.
+  Remplace l'appel `POST /relays` manuel de `install/README.md`.
+- **Compte d'interconnexion bloqué en `10000041`** (changement de mot de
+  passe imposé, impossible pour ce type de compte qui n'a pas accès au
+  portail) : procédure ajoutée dans `install/README.md` §5 (désactiver le
+  changement obligatoire du mot de passe initial *avant* de créer le compte).
+  Aucune API documentée sous la main pour modifier cette politique : c'est
+  une étape manuelle. Le driver traduit désormais `10000041`, `10100103` et
+  `10100380` en français dans ses messages d'erreur.

@@ -199,36 +199,50 @@ ressaisir, dis-le : ça se fait par `pg_dump`/`pg_restore` du volume
 Postgres de ton Mac vers celui de la VM, mais ce n'est pas fait par
 défaut pour ne pas mélanger silencieusement deux bases.
 
-### 5. Enregistrer cette VM comme relais
+### 5. Compte FusionCompute de l'application
 
-Pas encore de formulaire dans l'interface pour ça (§Ce que ce dossier ne
-couvre pas) — un appel direct à l'API, avec le jeton obtenu au login :
+L'application se connecte au VRM (port 7443) avec un compte dédié de type
+**« interconnexion d'interface »**. Un tel compte ne peut pas ouvrir le
+portail web, donc il ne peut pas changer lui-même son mot de passe. Si le
+VRM impose le changement du mot de passe initial, le compte se connecte
+mais chaque appel d'API est refusé avec l'erreur `10000041` (« pour la
+sécurité du compte, veuillez modifier le mot de passe »), et l'application
+reste bloquée.
 
-```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
-  --data-urlencode "username=TON_EMAIL" --data-urlencode "password=TON_MOT_DE_PASSE" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+**Avant de créer le compte**, connecté au portail
+(`https://<ip-vrm>:8443`) avec `admin` :
 
-curl -s http://localhost:8000/api/v1/endpoints -H "Authorization: Bearer $TOKEN"
-# repérer l'id de l'endpoint FusionCompute cible (kind=fusioncompute) dans la réponse
+1. **Système → Gestion des droits → Politique de mot de passe** (ou
+   « Politique de gestion des droits », selon la version) : désactiver
+   « Le mot de passe initial doit être modifié à la première connexion » /
+   « Forcer le changement du mot de passe après réinitialisation ».
+   Si l'option existe, régler l'expiration sur « jamais » pour les comptes
+   d'interconnexion : sinon le blocage revient à chaque expiration.
+2. **Système → Gestion des droits → Gestion des utilisateurs → Créer** :
 
-curl -s -X POST http://localhost:8000/api/v1/relays \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{
-        "target_id": "<id endpoint FusionCompute ci-dessus>",
-        "fc_vm_uri": "<uri VRM de cette VM>",
-        "agent_url": "non utilise - relais colocalise, pas d agent reseau (D7)",
-        "max_slots": 12
-      }'
-```
+   | Champ | Valeur |
+   |---|---|
+   | Type | Utilisateur d'interconnexion d'interface |
+   | Rôle | `administrator` (création de volumes et de VM) |
+   | 2FA | désactivée |
+   | Restriction d'IP | facultatif : l'IP de cette VM |
 
-`fc_vm_uri` est l'URI VRM de cette VM dans FusionCompute (forme du type
-`/service/sites/<site>/vms/<id>`, ARCHITECTURE.md §7.5) — aucun outil de
-cette session n'atteint le VRM pour la retrouver automatiquement ; elle se
-lit dans la console FusionCompute, sur la fiche de cette VM. `agent_url`
-est un champ obligatoire du schéma mais réservé et non utilisé tant qu'un
-agent réseau n'existe pas (D7 : il n'y en aura pas dans ce déploiement) —
-n'importe quelle valeur non vide convient.
+3. Dans l'interface V2FC, créer l'environnement FusionCompute avec ce
+   compte, puis « Tester ». La liste des sites doit s'afficher.
+
+Compte déjà créé et bloqué en `10000041` : appliquer l'étape 1, puis
+réinitialiser son mot de passe depuis `admin`. L'interface V2FC affiche
+alors ce diagnostic en clair au lieu du message chinois du VRM.
+
+### 6. Relais : enregistrement automatique
+
+Rien à saisir. Le service `runner` lit l'UUID matériel de cette VM
+(`/sys/class/dmi/id/product_uuid`), que FusionCompute présente comme
+`uuid` de la VM, et l'API la recherche dans chaque environnement
+FusionCompute déclaré. Trouvée, elle est enregistrée comme relais
+(statut ONLINE), au démarrage du runner puis toutes les 10 minutes : un
+environnement FusionCompute ajouté après coup est donc pris en compte
+sans redémarrage. Vérifier : `docker compose logs runner | grep relais`.
 
 Une fois le relais enregistré, choisis-le à la création du job (onglet
 Migration). Le service `runner` (démarré par `start-webapp.sh` dès que le
@@ -251,12 +265,13 @@ build-datamover.sh    construit l'image Docker du Data Mover
 
 ## Ce que ce dossier ne couvre pas
 
-- Le driver cible FusionCompute (écriture) — écrit mais pas encore validé
-  sur le lab réel (voir `HANDOFF.md` §13).
+- La bascule finale (création de la VM cible sur FusionCompute) : écrite
+  mais pas encore validée en réel. Création de volumes, écriture et seed
+  le sont (`HANDOFF.md` §20-22).
 - Un déploiement de production (le service `web` sert le serveur de
   développement Vite, pas un build statique servi par nginx — cf.
   commentaire en tête de `v2fc/web/Dockerfile` : à revoir quand le projet
   sortira du stade lab).
-- L'enregistrement d'un relais (`POST /api/v1/relays`) : pas encore de
-  formulaire dans l'interface, seulement un appel API direct — voir
-  §Déploiement sur une VM du cluster FusionCompute ci-dessous.
+- Un relais sur une autre VM que celle qui héberge le runner : le runner
+  n'enregistre que sa propre VM ; un relais distant reste à déclarer par
+  `POST /api/v1/relays`.
