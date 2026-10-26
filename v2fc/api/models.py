@@ -179,6 +179,10 @@ class Job(Base):
     state_since: Mapped[datetime] = mapped_column(server_default=func.now())
     spec: Mapped[dict] = mapped_column(JSON, default=dict)
     cbt_reseed_count: Mapped[int] = mapped_column(default=0)
+    # Delta manuel / planifié (migration 0007) : plus de delta périodique.
+    delta_requested: Mapped[bool] = mapped_column(default=False, server_default="false")
+    delta_scheduled_at: Mapped[datetime | None]
+    delta_repeat_daily: Mapped[bool] = mapped_column(default=False, server_default="false")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 

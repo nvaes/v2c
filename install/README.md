@@ -246,9 +246,11 @@ sans redémarrage. Vérifier : `docker compose logs runner | grep relais`.
 
 Une fois le relais enregistré, choisis-le à la création du job (onglet
 Migration). Le service `runner` (démarré par `start-webapp.sh` dès que le
-VDDK est présent) exécute alors tout seul le seed après le provisioning, un
-delta toutes les `V2FC_DELTA_INTERVAL_MIN` minutes (60 par défaut, dans
-`v2fc/.env`) et le delta final après « Migrer maintenant ». Il écrit
+VDDK est présent) exécute alors tout seul le seed après le provisioning et
+le delta final après « Migrer maintenant ». Les deltas intermédiaires ne
+partent que sur demande, depuis l'onglet Migration : « Lancer un delta
+maintenant », ou planification à une date et heure (répétable chaque
+jour). Il écrit
 directement sur les volumes FusionCompute attachés à cette VM
 (`/dev/disk/by-id/virtio-<UUID du volume>`). Suivi :
 `docker compose logs -f runner` et l'onglet Logs.

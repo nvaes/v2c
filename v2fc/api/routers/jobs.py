@@ -27,7 +27,7 @@ détail) :
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -38,9 +38,9 @@ from .. import vsphere_bridge
 from ..db import get_db
 from ..models import (Credential, DiskRound, Endpoint, Job, JobDisk, JobLogEntry,
                       Plan, PlanVm, Relay, SyncRound, User)
-from ..schemas import (JobCreate, JobCutoverRequest, JobLogsIn, JobLogsOut,
-                       JobOut, JobRoundProgress, JobRoundReport, JobRoundStart,
-                       JobRunContext)
+from ..schemas import (JobCreate, JobCutoverRequest, JobDeltaSchedule, JobLogsIn,
+                       JobLogsOut, JobOut, JobRoundProgress, JobRoundReport,
+                       JobRoundStart, JobRunContext)
 from ..security import decrypt_credential_password, require_role
 from datamover import fusioncompute as fc
 from datamover.vsphere import VSphereClient, VSphereError
@@ -297,6 +297,7 @@ async def get_run_context(job_id: uuid.UUID, round: str,
             _set_state(job, "SEEDING")
         elif kind == "DELTA":
             _set_state(job, "SYNCING")
+            _consume_delta_trigger(job)
         else:
             _set_state(job, "FINAL_DELTA")
         await db.flush()
@@ -315,6 +316,66 @@ async def get_run_context(job_id: uuid.UUID, round: str,
         "src_verify_tls": source.verify_tls, "vm_moref": job.src_vm_moref,
         "vm_instance_uuid": job.src_instance_uuid, "vm_name": job.src_vm_name,
     }
+
+
+# ---------------------------------------------------------------------------
+# Delta manuel ou planifié (26/10/2026) — remplace le delta périodique : le
+# runner ne lance un delta que si `delta_requested` ou `delta_scheduled_at`
+# échu (api/routers/runner.py).
+# ---------------------------------------------------------------------------
+def _consume_delta_trigger(job: Job) -> None:
+    """Au démarrage d'un delta : la demande est servie ; une planification
+    quotidienne passe à la prochaine occurrence future, une ponctuelle
+    s'efface (si elle était échue — sinon elle reste pour plus tard)."""
+    job.delta_requested = False
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if job.delta_scheduled_at is not None and job.delta_scheduled_at <= now:
+        if job.delta_repeat_daily:
+            while job.delta_scheduled_at <= now:
+                job.delta_scheduled_at += timedelta(days=1)
+        else:
+            job.delta_scheduled_at = None
+
+
+@router.post("/{job_id}/delta", response_model=JobOut)
+async def request_delta(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                        _user: User = Depends(require_role("operator"))) -> dict:
+    """« Lancer un delta maintenant » : le runner le démarre sous 15 s."""
+    job = await db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job introuvable")
+    if job.state != "SYNCED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=f"delta impossible depuis l'état {job.state} "
+                                   f"(il faut un job synchronisé, seed terminé)")
+    if job.relay_id is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="job sans relais : lancer le delta avec la commande affichée")
+    job.delta_requested = True
+    await _log(db, job.id, "delta demandé manuellement")
+    await db.commit()
+    return await _load_job_full(db, job.id)
+
+
+@router.put("/{job_id}/delta-schedule", response_model=JobOut)
+async def set_delta_schedule(job_id: uuid.UUID, body: JobDeltaSchedule,
+                             db: AsyncSession = Depends(get_db),
+                             _user: User = Depends(require_role("operator"))) -> dict:
+    """Planifie le prochain delta (`at`, répétable chaque jour) ou l'annule (`at` null)."""
+    job = await db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job introuvable")
+    if body.at is None:
+        job.delta_scheduled_at, job.delta_repeat_daily = None, False
+        await _log(db, job.id, "planification des deltas annulée")
+    else:
+        at = body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc)
+        job.delta_scheduled_at = at.astimezone(timezone.utc).replace(tzinfo=None)
+        job.delta_repeat_daily = body.repeat_daily
+        await _log(db, job.id, f"delta planifié le {job.delta_scheduled_at:%d/%m/%Y %H:%M} UTC"
+                               + (", puis chaque jour à la même heure" if body.repeat_daily else ""))
+    await db.commit()
+    return await _load_job_full(db, job.id)
 
 
 # ---------------------------------------------------------------------------

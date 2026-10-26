@@ -65,7 +65,6 @@ services:
       V2FC_KEK: ${V2FC_KEK:?voir .env.example}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       V2FC_RUNNER_TOKEN: ${V2FC_RUNNER_TOKEN:-}
-      V2FC_DELTA_INTERVAL_MIN: ${V2FC_DELTA_INTERVAL_MIN:-60}
     ports:
       - "127.0.0.1:8000:8000"
 

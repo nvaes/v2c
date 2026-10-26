@@ -318,6 +318,9 @@ class JobOut(BaseModel):
     state_since: datetime
     spec: dict
     cbt_reseed_count: int
+    delta_requested: bool = False
+    delta_scheduled_at: datetime | None = None
+    delta_repeat_daily: bool = False
     created_at: datetime
     disks: list[JobDiskOut] = Field(default_factory=list)
     rounds: list[SyncRoundOut] = Field(default_factory=list)
@@ -377,6 +380,13 @@ class DiskRoundReport(BaseModel):
     next_change_id: str | None = None
     capacity_bytes: int | None = None
     bytes_transferred: int | None = None
+
+
+class JobDeltaSchedule(BaseModel):
+    # Date du prochain delta (avec fuseau, ex. venant du navigateur) ; null
+    # annule la planification.
+    at: datetime | None = None
+    repeat_daily: bool = False
 
 
 class JobRoundProgress(BaseModel):

@@ -32,7 +32,8 @@ function autoRoundStatus(job: JobOut): string {
   }
   if (job.state === "SEEDING") return "seed en attente du runner (démarrage automatique)";
   if (job.state === "FINAL_DELTA") return "delta final en attente du runner (démarrage automatique)";
-  if (job.state === "SYNCED") return "synchronisé — delta automatique périodique";
+  if (job.state === "SYNCED" && job.delta_requested) return "delta demandé — démarrage sous 15 s";
+  if (job.state === "SYNCED") return "synchronisé — delta à lancer à la main ou à planifier";
   return "";
 }
 
@@ -66,6 +67,18 @@ function RoundProgress({ job }: { job: JobOut }) {
   );
 }
 
+// Horodatages de l'API : UTC sans fuseau.
+function utc(s: string): Date {
+  return new Date(s + "Z");
+}
+
+// Valeur d'un <input type="datetime-local"> (heure locale du navigateur).
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function jobRunCommand(job: JobOut, kind: "seed" | "delta" | "final"): string {
   return (
     `V2FC_API_TOKEN=<jeton> docker run --rm --platform linux/amd64 \\\n` +
@@ -87,6 +100,9 @@ export default function MigrationPage() {
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [autoRestart, setAutoRestart] = useState<Record<string, boolean>>({});
+  // Planificateur de delta en cours de saisie, par job.
+  const [scheduleAt, setScheduleAt] = useState<Record<string, string>>({});
+  const [scheduleDaily, setScheduleDaily] = useState<Record<string, boolean>>({});
   // Relais choisi par VM de plan avant création du job ("" = aucun relais,
   // écriture locale). Absent = premier relais de la cible du plan.
   const [relayChoice, setRelayChoice] = useState<Record<string, string>>({});
@@ -171,6 +187,42 @@ export default function MigrationPage() {
     } finally {
       setBusyKey(null);
     }
+  }
+
+  async function runAction(jobId: string, action: () => Promise<unknown>) {
+    setBusyKey(jobId);
+    setError(null);
+    try {
+      await action();
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  function clearScheduleDraft(jobId: string) {
+    const drop = <T,>(p: Record<string, T>) => {
+      const next = { ...p };
+      delete next[jobId];
+      return next;
+    };
+    setScheduleAt(drop);
+    setScheduleDaily(drop);
+  }
+
+  function saveSchedule(job: JobOut, at: string | null) {
+    runAction(job.id, async () => {
+      await api.setDeltaSchedule(job.id, at, at ? scheduleDaily[job.id] ?? job.delta_repeat_daily : false);
+      clearScheduleDraft(job.id);
+    });
+  }
+
+  // Valeur affichée : saisie en cours, sinon planification enregistrée.
+  function scheduleValue(job: JobOut): string {
+    return scheduleAt[job.id] ??
+      (job.delta_scheduled_at ? toLocalInput(utc(job.delta_scheduled_at)) : "");
   }
 
   async function retryFinalize(jobId: string) {
@@ -306,6 +358,59 @@ export default function MigrationPage() {
                     <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
                       {jobRunCommand(job, ROUND_KIND_FOR_STATE[job.state]!)}
                     </pre>
+                  </div>
+                )}
+
+                {job && job.relay_id && job.state === "SYNCED" && (
+                  <div style={{ margin: "8px 0" }}>
+                    <button
+                      className="secondary"
+                      disabled={busyKey === job.id || job.delta_requested}
+                      onClick={() => runAction(job.id, () => api.requestDelta(job.id))}
+                    >
+                      Lancer un delta maintenant
+                    </button>
+                    <span style={{ marginLeft: 16 }}>
+                      Planifier :{" "}
+                      <input
+                        type="datetime-local"
+                        value={scheduleValue(job)}
+                        onChange={(e) => setScheduleAt((p) => ({ ...p, [job.id]: e.target.value }))}
+                      />{" "}
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={scheduleDaily[job.id] ?? job.delta_repeat_daily}
+                          onChange={(e) => setScheduleDaily((p) => ({ ...p, [job.id]: e.target.checked }))}
+                        />{" "}
+                        chaque jour
+                      </label>{" "}
+                      <button
+                        className="secondary"
+                        disabled={busyKey === job.id || !scheduleValue(job) ||
+                          (scheduleAt[job.id] === undefined && scheduleDaily[job.id] === undefined)}
+                        // datetime-local = heure locale ; envoyée en ISO avec fuseau.
+                        onClick={() => saveSchedule(job, new Date(scheduleValue(job)).toISOString())}
+                      >
+                        Planifier
+                      </button>
+                      {job.delta_scheduled_at && (
+                        <button
+                          className="secondary"
+                          style={{ marginLeft: 4 }}
+                          disabled={busyKey === job.id}
+                          onClick={() => saveSchedule(job, null)}
+                        >
+                          Annuler
+                        </button>
+                      )}
+                    </span>
+                    {job.delta_scheduled_at && (
+                      <p className="muted" style={{ margin: "4px 0 0" }}>
+                        Prochain delta : {utc(job.delta_scheduled_at).toLocaleString()}
+                        {job.delta_repeat_daily ? " (puis chaque jour à la même heure)" : ""}
+                      </p>
+                    )}
                   </div>
                 )}
 

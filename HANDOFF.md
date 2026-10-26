@@ -1750,3 +1750,17 @@ Nicolas renvoyait 500 — `disk_rounds.job_disk_id` n'était pas en
 donc tout job ayant rapporté un round était insupprimable. Après correctif,
 PLAN1 supprimé avec son job CUTOVER_DONE : VM R00vSkypeEd (`i-0000000E`) et
 son volume 70 intacts sur FusionCompute, comme prévu.
+
+## 28. Deltas manuels ou planifiés, plus de delta périodique (26/10/2026)
+
+Demande de Nicolas : pas de delta automatique toutes les N minutes.
+`V2FC_DELTA_INTERVAL_MIN` supprimé (config, compose, `.env.example`).
+Colonnes `jobs.delta_requested`, `delta_scheduled_at` (UTC),
+`delta_repeat_daily` (migration 0007). Le runner ne prend un job SYNCED que
+si un delta est demandé (`POST /jobs/{id}/delta`, bouton « Lancer un delta
+maintenant ») ou si la date planifiée est échue (`PUT /jobs/{id}/delta-schedule`,
+champ date/heure locale + « chaque jour » dans l'onglet Migration). Au
+démarrage du delta (`run-context`), la demande est consommée ; une
+planification quotidienne passe au lendemain même heure (heure UTC fixe :
+décalage d'une heure aux changements d'heure), une ponctuelle s'efface.
+Seed après provisioning et delta final de la bascule restent automatiques.

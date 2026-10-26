@@ -24,7 +24,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
-from ..config import get_settings
 from ..db import get_db
 from ..models import Credential, Endpoint, Job, JobDisk, Relay, SyncRound, User
 from ..schemas import RelayOut, RunnerRegister, RunnerSourceCredentials, RunnerWorkItem
@@ -45,7 +44,6 @@ _ROUND_FOR_STATE = {"SEEDING": "seed", "SYNCING": "delta", "FINAL_DELTA": "final
 async def get_work(db: AsyncSession = Depends(get_db),
                    _runner: User = Depends(require_runner)) -> list[dict]:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    delta_every = timedelta(minutes=get_settings().delta_interval_min)
     jobs = (await db.execute(
         select(Job).where(Job.relay_id.is_not(None),
                           Job.state.in_([*_ROUND_FOR_STATE, "SYNCED"])))).scalars().all()
@@ -61,9 +59,11 @@ async def get_work(db: AsyncSession = Depends(get_db),
                 and now - last.ended_at < _RETRY_AFTER:
             continue
         if job.state == "SYNCED":
-            if last is not None and last.ended_at and now - last.ended_at < delta_every:
-                continue
-            work.append({"job_id": job.id, "round": "delta"})
+            # Delta seulement sur demande : bouton ou planificateur (26/10/2026,
+            # Nicolas ne veut pas de delta périodique automatique).
+            due = job.delta_scheduled_at is not None and job.delta_scheduled_at <= now
+            if job.delta_requested or due:
+                work.append({"job_id": job.id, "round": "delta"})
         else:
             work.append({"job_id": job.id, "round": _ROUND_FOR_STATE[job.state]})
     return work
