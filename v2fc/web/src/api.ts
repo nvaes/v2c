@@ -100,6 +100,7 @@ export const api = {
       body: JSON.stringify({ auto_restart: autoRestart }),
     }),
   rollbackJob: (id: string) => request<JobOut>(`/jobs/${id}/rollback`, { method: "POST" }),
+  finalizeJob: (id: string) => request<JobOut>(`/jobs/${id}/finalize`, { method: "POST" }),
   getJobLogs: (id: string, since?: string) =>
     request<JobLogsOut>(`/jobs/${id}/logs${since ? `?since=${encodeURIComponent(since)}` : ""}`),
 };

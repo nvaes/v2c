@@ -1664,3 +1664,29 @@ tourne). La page Migration affiche barre, %, Gio, débit et temps restant.
   Aucune API documentée sous la main pour modifier cette politique : c'est
   une étape manuelle. Le driver traduit désormais `10000041`, `10100103` et
   `10100380` en français dans ses messages d'erreur.
+
+## 24. Première bascule réelle : finalisation corrigée (26/10/2026)
+
+R00vSkypeEd (PLAN1) : bascule lancée par Nicolas, delta final OK (VM déjà
+éteinte, 0 Mio), puis `create_vm` refusé par le VRM : `10300069` « le type
+de système d'exploitation ne peut pas être vide ». `_finalize`, jamais
+exercé, avait aussi d'autres défauts. Corrigé :
+
+- `osOptions` obligatoire : code pris dans `GET /vms/osversions` (endpoint
+  constaté sur le VRM) par `fusioncompute.pick_os_version()`, d'après le
+  `guestFullName` vSphere (Tools si disponible) ; repli « Other ».
+- CPU, mémoire et firmware repris de la VM source (étaient 2 vCPU / 4 Go /
+  BIOS en dur).
+- Disques attachés en **IDE** (3 premiers), VIRTIO au-delà : une VM venue de
+  VMware n'a pas de pilote virtio (Windows : INACCESSIBLE_BOOT_DEVICE).
+  Passer en VIRTIO après installation des outils FusionCompute.
+- Finalisation reprenable : `POST /jobs/{id}/finalize` (bouton « Relancer la
+  finalisation ») ; étapes déjà faites sautées (volume déjà détaché, VM déjà
+  créée — `tgt_vm_uri` enregistré dès la création —, volume déjà attaché).
+
+Résultat : VM `i-0000000E` « R00vSkypeEd » créée éteinte, 6 vCPU, 32 Go,
+BIOS, Windows Server 2016, volume 70 (101 Gio) en IDE, une carte sur le port
+group DMZ. **Pas encore vérifié** : le démarrage de la VM. Restent ouverts :
+une seule carte réseau créée (la source en a deux), de type virtio (pas de
+réseau sous Windows avant les outils FusionCompute) ; la signature V2FC
+reste dans le dernier secteur du volume (hors des 100 Gio de données).

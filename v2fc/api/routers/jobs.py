@@ -399,11 +399,15 @@ async def report_round(job_id: uuid.UUID, round_id: uuid.UUID, body: JobRoundRep
 
 async def _finalize(db: AsyncSession, job: Job) -> None:
     """
-    FINALIZING (§5) : détache le volume du relais, l'attache à une VM cible
-    nouvellement créée, démarre si demandé. Ne peut aboutir à CUTOVER_DONE
-    que si un relais est réellement assigné — sinon reste en FINALIZING
-    avec une entrée de log expliquant pourquoi (pas de FC réel à cette
-    étape du projet, voir note de module).
+    FINALIZING (§5) : détache les volumes du relais, crée la VM cible avec le
+    matériel de la VM source, y attache les volumes, démarre si demandé.
+    Reprenable (`POST /jobs/{id}/finalize`) : chaque étape déjà faite est
+    sautée (volume déjà détaché, VM déjà créée, volume déjà attaché). En
+    cas d'erreur, le job reste en FINALIZING avec l'erreur dans les logs.
+
+    Corrigé le 26/10/2026 au premier essai réel (R00vSkypeEd) : `osOptions`
+    obligatoire, CPU/mémoire/firmware repris de la source au lieu de valeurs
+    par défaut, disques attachés en IDE (voir `_TARGET_PCI_TYPE`).
     """
     _set_state(job, "FINALIZING")
     relay = await db.get(Relay, job.relay_id) if job.relay_id else None
@@ -414,46 +418,71 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
                    "warning")
         return
 
+    source = await db.get(Endpoint, job.source_id)
+    src_args = await _connection_args(db, source)
+    try:
+        hw = await run_in_threadpool(_source_hardware, src_args, job.src_instance_uuid)
+    except VSphereError as exc:
+        await _log(db, job.id, f"bascule finale : lecture de la VM source impossible : {exc}", "error")
+        return
+
     target = await db.get(Endpoint, job.target_id)
     tgt_args = await _connection_args(db, target)
     plan_vm = (await db.execute(
         select(PlanVm).where(PlanVm.src_instance_uuid == job.src_instance_uuid,
                              PlanVm.plan_id == job.plan_id))).scalar_one_or_none()
-    disks = (await db.execute(select(JobDisk).where(JobDisk.job_id == job.id))).scalars().all()
+    disks = sorted((await db.execute(select(JobDisk).where(JobDisk.job_id == job.id))).scalars().all(),
+                   key=lambda d: d.device_key)
     relay_vm_id = relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1]
 
     try:
         with fc.FusionComputeClient(tgt_args["host"], tgt_args["user"], tgt_args["password"],
                                     port=target.port or fc.DEFAULT_API_PORT,
                                     verify=target.verify_tls) as fc_client:
-            for jd in disks:
-                if not jd.tgt_volume_uri:
-                    continue
-                vol_urn = f"urn:sites:{fc_client.site.id}:volumes:{jd.tgt_volume_uri.rstrip('/').rsplit('/', 1)[-1]}"
-                resp = fc_client.detach_volume(relay_vm_id, vol_urn=vol_urn)
-                fc_client.wait_task(resp["taskUri"])
+            def vol_urn(jd: JobDisk) -> str:
+                return f"urn:sites:{fc_client.site.id}:volumes:{jd.tgt_volume_uri.rstrip('/').rsplit('/', 1)[-1]}"
 
-            # Aucun autre moyen documenté de choisir l'emplacement de la VM
-            # cible (cluster/hôte) : on réutilise celui de la VM relais
-            # elle-même (§7.5 « Querying information about a specified VM »,
-            # champ `location`) — c'est l'environnement que Nicolas a déjà
-            # choisi en y déployant le relais.
-            relay_vm_info = fc_client.get_vm(relay_vm_id)
-            create_resp = fc_client.create_vm(
-                name=job.src_vm_name, location_urn=relay_vm_info["location"],
-                cpu_count=job.spec.get("cpu_count", 2), memory_mb=job.spec.get("memory_mb", 4096),
-                boot_firmware=job.spec.get("boot_firmware", "BIOS"),
-                nics=[{"portGroupUrn": plan_vm.tgt_network_urn}] if plan_vm.tgt_network_urn else [])
-            fc_client.wait_task(create_resp["taskUri"])
-            job.tgt_vm_uri = create_resp["uri"]
-            tgt_vm_id = create_resp["urn"].rstrip("/").rsplit(":", 1)[-1]
-
+            on_relay = {d["volumeUrn"] for d in fc_client.get_vm(relay_vm_id)["vmConfig"]["disks"]}
             for jd in disks:
-                if not jd.tgt_volume_uri:
+                if jd.tgt_volume_uri and vol_urn(jd) in on_relay:
+                    resp = fc_client.detach_volume(relay_vm_id, vol_urn=vol_urn(jd))
+                    fc_client.wait_task(resp["taskUri"])
+                    await _log(db, job.id, f"volume {vol_urn(jd)} détaché du relais")
+
+            if job.tgt_vm_uri is None:
+                os_type, os_version, os_label = fc.pick_os_version(
+                    fc_client.list_os_versions(), hw["guest_name"], hw["guest_id"])
+                # Aucun autre moyen documenté de choisir l'emplacement de la VM
+                # cible : celui de la VM relais (§7.5, champ `location`).
+                relay_vm_info = fc_client.get_vm(relay_vm_id)
+                create_resp = fc_client.create_vm(
+                    name=job.src_vm_name, location_urn=relay_vm_info["location"],
+                    cpu_count=hw["cpu"], memory_mb=hw["memory_mb"],
+                    os_type=os_type, os_version=os_version,
+                    boot_firmware="UEFI" if hw["firmware"] == "efi" else "BIOS",
+                    nics=[{"portGroupUrn": plan_vm.tgt_network_urn}]
+                    if plan_vm and plan_vm.tgt_network_urn else [])
+                fc_client.wait_task(create_resp["taskUri"])
+                job.tgt_vm_uri = create_resp["uri"]
+                await _log(db, job.id,
+                           f"VM cible créée : {hw['cpu']} vCPU, {hw['memory_mb']} Mo, "
+                           f"{hw['firmware'].upper()}, OS « {os_label} » "
+                           f"(source : {hw['guest_name']})")
+                await db.commit()
+            tgt_vm_id = job.tgt_vm_uri.rstrip("/").rsplit("/", 1)[-1]
+
+            on_target = {d["volumeUrn"] for d in fc_client.get_vm(tgt_vm_id)["vmConfig"]["disks"]}
+            for i, jd in enumerate(d for d in disks if d.tgt_volume_uri):
+                if vol_urn(jd) in on_target:
                     continue
-                vol_urn = f"urn:sites:{fc_client.site.id}:volumes:{jd.tgt_volume_uri.rstrip('/').rsplit('/', 1)[-1]}"
-                resp = fc_client.attach_volume(tgt_vm_id, vol_urn=vol_urn)
+                pci = _TARGET_PCI_TYPE if i < _IDE_SLOTS else "VIRTIO"
+                resp = fc_client.attach_volume(tgt_vm_id, vol_urn=vol_urn(jd), pci_type=pci)
                 fc_client.wait_task(resp["taskUri"])
+                await _log(db, job.id, f"volume {vol_urn(jd)} attaché à la VM cible ({pci})")
+            if len(disks) > _IDE_SLOTS:
+                await _log(db, job.id,
+                           f"disques au-delà du {_IDE_SLOTS}e attachés en VIRTIO : visibles une "
+                           f"fois les outils FusionCompute installés dans la VM", "warning")
 
             if job.spec.get("auto_restart"):
                 resp = fc_client.power_on(tgt_vm_id)
@@ -464,7 +493,45 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
         return
 
     _set_state(job, "CUTOVER_DONE")
-    await _log(db, job.id, "bascule terminée — VM cible créée sur FusionCompute")
+    await _log(db, job.id, "bascule terminée — VM cible créée sur FusionCompute. Disques en "
+                           "IDE : installer les outils FusionCompute dans la VM avant de les "
+                           "passer en VIRTIO (performances)")
+
+
+# Une VM venue de VMware n'a pas de pilote virtio (Windows en particulier :
+# écran bleu INACCESSIBLE_BOOT_DEVICE au démarrage). IDE fonctionne sans
+# pilote, mais FusionCompute n'en propose que 3 emplacements.
+_TARGET_PCI_TYPE = "IDE"
+_IDE_SLOTS = 3
+
+
+def _source_hardware(src_args: dict, instance_uuid: str) -> dict:
+    with VSphereClient(src_args["host"], src_args["user"], src_args["password"],
+                       port=src_args["port"], verify=src_args["verify_tls"]) as client:
+        vm = client.find_vm(instance_uuid=instance_uuid).raw
+        cfg = vm.config
+        # Nom remonté par VMware Tools (plus précis) s'il existe, sinon celui
+        # déclaré dans la configuration de la VM.
+        guest_name = (vm.guest.guestFullName if vm.guest else None) or cfg.guestFullName
+        return {"cpu": cfg.hardware.numCPU, "memory_mb": cfg.hardware.memoryMB,
+                "firmware": cfg.firmware or "bios", "guest_name": guest_name,
+                "guest_id": cfg.guestId or ""}
+
+
+@router.post("/{job_id}/finalize", response_model=JobOut)
+async def retry_finalize(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                         _user: User = Depends(require_role("operator"))) -> dict:
+    """Relance une finalisation restée en FINALIZING après une erreur."""
+    job = await db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job introuvable")
+    if job.state != "FINALIZING":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=f"finalisation impossible depuis l'état {job.state}")
+    await _log(db, job.id, "finalisation relancée")
+    await _finalize(db, job)
+    await db.commit()
+    return await _load_job_full(db, job.id)
 
 
 # ---------------------------------------------------------------------------

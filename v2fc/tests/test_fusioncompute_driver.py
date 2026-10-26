@@ -307,7 +307,8 @@ def test_create_vm_has_no_disks_and_respects_boot_firmware(monkeypatch):
     }))
 
     out = client.create_vm(name="srv-app-01", location_urn="urn:sites:1:clusters:1",
-                           cpu_count=4, memory_mb=8192, boot_firmware="UEFI")
+                           cpu_count=4, memory_mb=8192, boot_firmware="UEFI",
+                           os_type="Windows", os_version=1173)
 
     call = next(c for c in session.calls if c["url"].endswith("/sites/05C9108A/vms"))
     assert call["json"]["vmConfig"]["disks"] == []
@@ -315,6 +316,7 @@ def test_create_vm_has_no_disks_and_respects_boot_firmware(monkeypatch):
     assert call["json"]["vmConfig"]["cpu"] == {"quantity": 4}
     assert call["json"]["vmConfig"]["memory"] == {"quantityMB": 8192}
     assert call["json"]["autoBoot"] is False
+    assert call["json"]["osOptions"] == {"osType": "Windows", "osVersion": 1173}
     assert out["urn"] == "urn:sites:1:vms:99"
 
 
@@ -376,3 +378,34 @@ def test_error_detail_translates_forced_password_change():
     resp = FakeResponse(status_code=400, json_data={
         "errorCode": "10000041", "errorDes": "为保证账号口令安全，请修改密码。"})
     assert "changement du mot de passe" in _error_detail(resp)
+
+
+# Extrait de GET /vms/osversions du VRM réel (26/10/2026).
+_OS_VERSIONS = {
+    "windows": [
+        {"id": 202, "versionDes": "Other Windows(64 bit)", "osBit": 64},
+        {"id": 1028, "versionDes": "Windows 10 Enterprise 2016 LTSB 64bit", "osBit": 64},
+        {"id": 1173, "versionDes": "Windows Server 2016 Datacenter 64bit", "osBit": 64},
+        {"id": 1230, "versionDes": "Windows Server 2008 DataCenter R2 SP1 64bit", "osBit": 64},
+    ],
+    "linux": [
+        {"id": 302, "versionDes": "Other Linux(64 bit)", "osBit": 64},
+        {"id": 183, "versionDes": "CentOS 6.5 64bit", "osBit": 64},
+        {"id": 1202, "versionDes": "CentOS 7.6 64bit", "osBit": 64},
+    ],
+}
+
+
+def test_pick_os_version_matches_real_source_vms():
+    from datamover.fusioncompute import pick_os_version
+    # R00vSkypeEd et R00vSkype-OVOC, guestFullName vSphere réels
+    assert pick_os_version(_OS_VERSIONS, "Microsoft Windows Server 2016 or later (64-bit)",
+                           "windows9Server64Guest")[:2] == ("Windows", 1173)
+    assert pick_os_version(_OS_VERSIONS, "CentOS 4/5/6 (64-bit)", "centos64Guest")[:2] \
+        == ("Linux", 183)
+
+
+def test_pick_os_version_falls_back_to_other():
+    from datamover.fusioncompute import pick_os_version
+    assert pick_os_version(_OS_VERSIONS, "FreeBSD 13 (64-bit)", "freebsd13_64Guest")[:2] \
+        == ("Linux", 302)

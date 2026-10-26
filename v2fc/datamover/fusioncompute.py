@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from dataclasses import dataclass
 
@@ -107,6 +108,40 @@ _KNOWN_ERRORS = {
     "10100380": "ce compte ne peut pas utiliser l'API sur ce port : il faut un "
                 "compte de type « interconnexion d'interface »",
 }
+
+
+_OS_NAME_NOISE = {"microsoft", "or", "later", "bit", "64", "32", "64bit", "32bit", "edition"}
+
+
+def pick_os_version(os_versions: dict, guest_name: str, guest_id: str = "") -> tuple[str, int, str]:
+    """
+    Code `osVersion` FusionCompute le plus proche de l'OS source vSphere
+    (`guestFullName`, de préférence celui remonté par VMware Tools).
+    Renvoie (osType « Windows »/« Linux », id, libellé FusionCompute).
+
+    Rapprochement par mots communs (« windows server 2016 », « centos 6 »...) ;
+    sans correspondance d'au moins deux mots, repli sur « Other Windows/Linux »
+    de la bonne architecture — le choix n'influe que sur des réglages
+    d'émulation, pas sur le contenu du disque migré.
+    """
+    words = lambda text: set(re.findall(r"[a-z]+|\d+", text.lower()))
+    windows = "windows" in f"{guest_name} {guest_id}".lower()
+    family = "windows" if windows else "linux"
+    bits = 32 if re.search(r"32[- ]?bit", guest_name.lower()) else 64
+    wanted = words(guest_name) - _OS_NAME_NOISE
+    candidates = [v for v in os_versions.get(family, []) if v.get("osBit", 64) == bits]
+
+    best, best_score = None, 1
+    for v in candidates:
+        score = len(wanted & words(v["versionDes"]))
+        if score > best_score:
+            best, best_score = v, score
+    if best is None:
+        other = f"Other {'Windows' if windows else 'Linux'}({bits} bit)"
+        best = next((v for v in candidates if v["versionDes"].startswith(other)), None)
+    if best is None:
+        raise FusionComputeError(f"aucun type d'OS FusionCompute pour « {guest_name} »")
+    return ("Windows" if windows else "Linux"), int(best["id"]), best["versionDes"]
 
 
 def _error_detail(resp: "requests.Response") -> str:
@@ -462,8 +497,15 @@ class FusionComputeClient:
         return self._post(f"/sites/{self.site.id}/vms/{vm_id}/action/detachvol",
                           {"volUrn": vol_urn, "isFormat": False})
 
+    def list_os_versions(self) -> dict:
+        """`GET <vm_uri>/osversions` — {"windows": [...], "linux": [...], ...},
+        chaque entrée `{id, versionDes, osType, osBit, ...}` (constaté sur le VRM
+        réel le 26/10/2026 : `create_vm` refuse une VM sans `osOptions`)."""
+        return self._get(f"/sites/{self.site.id}/vms/osversions")
+
     def create_vm(self, *, name: str, location_urn: str, cpu_count: int,
-                  memory_mb: int, boot_firmware: str = "BIOS",
+                  memory_mb: int, os_type: str, os_version: int,
+                  boot_firmware: str = "BIOS",
                   nics: list[dict] | None = None, auto_boot: bool = False) -> dict:
         """
         `POST <vm_uri>` (§7.5 ⑤, section « Creating a VM » — Table 3-1 pour
@@ -489,6 +531,9 @@ class FusionComputeClient:
             "name": name,
             "location": location_urn,
             "vmConfig": vm_config,
+            # Obligatoire : sans lui, 10300069 « le type de système
+            # d'exploitation ne peut pas être vide » (26/10/2026).
+            "osOptions": {"osType": os_type, "osVersion": os_version},
             "autoBoot": auto_boot,
         }
         return self._post(f"/sites/{self.site.id}/vms", body)

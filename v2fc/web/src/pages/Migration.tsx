@@ -173,6 +173,19 @@ export default function MigrationPage() {
     }
   }
 
+  async function retryFinalize(jobId: string) {
+    setBusyKey(jobId);
+    setError(null);
+    try {
+      await api.finalizeJob(jobId);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function rollback(jobId: string) {
     if (!window.confirm("Annuler la bascule et rallumer la VM source ?")) return;
     setBusyKey(jobId);
@@ -310,6 +323,17 @@ export default function MigrationPage() {
                     </label>
                     <button disabled={busyKey === job.id} onClick={() => cutover(job.id)}>
                       {busyKey === job.id ? "…" : "Migrer maintenant"}
+                    </button>
+                  </p>
+                )}
+
+                {job && job.state === "FINALIZING" && (
+                  <p>
+                    <span className="muted">
+                      Finalisation interrompue — voir l'erreur dans les Logs.{" "}
+                    </span>
+                    <button disabled={busyKey === job.id} onClick={() => retryFinalize(job.id)}>
+                      {busyKey === job.id ? "…" : "Relancer la finalisation"}
                     </button>
                   </p>
                 )}
