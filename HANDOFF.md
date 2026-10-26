@@ -1686,7 +1686,9 @@ exercé, avait aussi d'autres défauts. Corrigé :
 
 Résultat : VM `i-0000000E` « R00vSkypeEd » créée éteinte, 6 vCPU, 32 Go,
 BIOS, Windows Server 2016, volume 70 (101 Gio) en IDE, une carte sur le port
-group DMZ. **Pas encore vérifié** : le démarrage de la VM. Restent ouverts :
+group DMZ. **Démarrage confirmé par Nicolas le 26/10/2026** : Windows Server 2016
+démarre sur FusionCompute depuis le disque IDE — première migration
+VMware → FusionCompute complète de bout en bout. Restent ouverts :
 une seule carte réseau créée (la source en a deux), de type virtio (pas de
 réseau sous Windows avant les outils FusionCompute) ; la signature V2FC
 reste dans le dernier secteur du volume (hors des 100 Gio de données).
