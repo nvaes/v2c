@@ -1,7 +1,7 @@
 """
 Registre des VM relais (ARCHITECTURE.md §7.1/§13) — enregistrement, pas
 d'orchestration : ce routeur ne fait qu'inscrire une VM relais existante
-(créée par Nicolas dans FusionCompute) et l'URL où son agent réseau
+(créée par l'opérateur dans FusionCompute) et l'URL où son agent réseau
 écoutera plus tard. Voir `datamover/fusioncompute.py` (note de module) :
 cet agent réseau lui-même n'est pas encore écrit — le champ `agent_url`
 est donc réservé, sans caller côté job aujourd'hui.

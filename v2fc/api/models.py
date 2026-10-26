@@ -2,7 +2,7 @@
 Modèle de données — ARCHITECTURE.md §8.1, complété par les tables qui y sont
 référencées mais jamais définies dans le document (`credentials`, `plans`) et
 par la table `users` qu'exige l'authentification du §9 mais qui n'est
-décrite nulle part. Ces ajouts sont documentés dans HANDOFF.md — ce ne sont
+décrite nulle part. Ces ajouts sont documentés dans docs/dev/JOURNAL.md — ce ne sont
 pas des décisions d'API vSphere/FusionCompute (où « ne rien inventer »
 s'applique), juste la plomberie ordinaire qu'un schéma applicatif requiert.
 """
@@ -74,7 +74,7 @@ class Endpoint(Base):
     # Port TCP de l'API. Historiquement toujours 443 (implicite, jamais
     # stocké) tant que seul vCenter/ESXi existait. FusionCompute casse cette
     # hypothèse : ARCHITECTURE.md §7.5 documente un port d'API (7443) distinct
-    # du port de la console VRM (8443, celui donné par Nicolas) — les deux
+    # du port de la console VRM (8443, celui donné par l'exploitant) — les deux
     # restent à distinguer sur ce lab précis. D'où une colonne explicite,
     # plutôt que le 443 en dur qu'utilisait _connection_args jusqu'ici.
     port: Mapped[int] = mapped_column(default=443)
@@ -141,7 +141,7 @@ class PlanVm(Base):
     src_vm_name: Mapped[str]
     added_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
-    # Mapping cible par VM (étapes 4-5 du flux voulu par Nicolas, 17/09/2026:
+    # Mapping cible par VM (étapes 4-5 du flux voulu, 17/09/2026:
     # choix du datastore puis du réseau FusionCompute pour chaque VM). On ne
     # stocke QUE ce que datamover.fusioncompute.list_datastores/list_networks
     # renvoie déjà (urn + name), pas un nouvel objet inventé : le nom est
@@ -201,7 +201,7 @@ class JobDisk(Base):
     src_path: Mapped[str]
     # BIGINT, pas INTEGER : une capacité de disque en octets dépasse
     # systématiquement 2^31 (int4) dès qu'un disque fait plus de ~2 Go —
-    # confirmé le 17/09/2026 par Nicolas (asyncpg DataError "value out of
+    # confirmé le 17/09/2026 (asyncpg DataError "value out of
     # int32 range" sur un disque de 4 Gio, /jobs/{id}/provision).
     capacity_bytes: Mapped[int] = mapped_column(BigInteger)
     disk_mode: Mapped[str]

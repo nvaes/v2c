@@ -457,7 +457,7 @@ class SourceVm:
 
         Format imposé par VixDiskLibConnectParams.vmxSpec.
 
-        HANDOFF §5 quater : sur le lab du 15/09/2026 (connexion directe à un
+        journal §5 quater : sur le lab du 15/09/2026 (connexion directe à un
         hôte ESXi, sans vCenter), cette forme est rejetée par le VDDK à
         l'ouverture du disque (« Invalid search specifier »), alors que
         `moref=<self.moref>` fonctionne. Pas re-vérifié via vCenter — ne pas
@@ -489,7 +489,7 @@ class SourceVm:
         l'accès public à la documentation VDDK (§2.4), donc le format de
         chemin attendu par VixDiskLib_Open en connexion directe à un hôte
         (sans vCenter) n'a pas pu être confirmé par une source officielle.
-        Elle répond au blocage du §5 du HANDOFF : le journal VDDK y montre
+        Elle répond au blocage du §5 du journal : le journal VDDK y montre
         VixDiskLib_Open échouant à résoudre lui-même la notation « [ds] »
         (VixError=0x1, « Invalid search specifier »). Fournir directement le
         chemin absolu contourne cette résolution interne — à vérifier en
@@ -690,7 +690,7 @@ def vmx_spec_candidates(vm: "SourceVm") -> list[tuple[str, str]]:
     """
     Formes de vmxSpec à essayer pour VixDiskLib_ConnectEx, dans l'ordre.
 
-    HANDOFF §5 quater : sur ESXi 8.0.3 en connexion directe à l'hôte (sans
+    journal §5 quater : sur ESXi 8.0.3 en connexion directe à l'hôte (sans
     vCenter), `vm.vmx_spec` (« <vmx>?dcPath=...&dsName=... ») est rejeté par
     le VDDK à l'ouverture du disque, alors que `moref=<vm.moref>` fonctionne.
     Non re-vérifié via vCenter ni sur une autre version d'ESXi/VDDK : on

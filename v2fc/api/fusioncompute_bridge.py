@@ -19,7 +19,7 @@ def probe(host: str, user: str, password: str, port: int, verify_tls: bool) -> d
                 "ok": True,
                 "message": f"site {client.site.name or client.site.id}",
                 "platform": f"FusionCompute — site {client.site.name or client.site.id}",
-                "tls_fingerprint_sha1": None,  # cf. HANDOFF.md : pas encore relevé côté FC
+                "tls_fingerprint_sha1": None,  # cf. docs/dev/JOURNAL.md : pas encore relevé côté FC
             }
     except FusionComputeError as exc:
         return {"ok": False, "message": str(exc), "platform": None,

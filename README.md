@@ -9,21 +9,24 @@ interface web.
 
 Ce README couvre l'**installation**. La procédure détaillée et le
 dépannage sont dans [`install/README.md`](install/README.md), la conception
-dans [`ARCHITECTURE.md`](ARCHITECTURE.md) et l'historique/état du projet
-dans [`HANDOFF.md`](HANDOFF.md).
+dans [`ARCHITECTURE.md`](ARCHITECTURE.md) et l'historique technique (pour la
+maintenance) dans [`docs/dev/JOURNAL.md`](docs/dev/JOURNAL.md).
 
 ## Composants
 
 | Composant | Contenu | Lancement |
 |---|---|---|
 | **Socle web** | API FastAPI + interface React (Vite) + Postgres 16 + Redis 7 | `v2fc/docker-compose.yml`, tourne en continu |
-| **Data Mover** | Driver VDDK (Python/ctypes), CLI `v2fc_source.py` | image Docker `v2fc-datamover`, lancée à la demande |
+| **Runner** | Exécute les copies (seed, deltas, delta final) via le Data Mover, sur la VM relais | service `runner` de `v2fc/docker-compose.yml` |
+| **Data Mover** | Driver VDDK (Python/ctypes), CLI `v2fc_source.py` | lancé par le runner (ou à la main, mode validation) |
 
 ```
 .
 ├── README.md            ← ce fichier
 ├── ARCHITECTURE.md      dossier d'architecture
-├── HANDOFF.md           état du projet, procédures validées, dépannage (§11)
+├── docs/
+│   ├── GUIDE-UTILISATEUR.md guide d'utilisation
+│   └── dev/JOURNAL.md       historique technique, constats sur VMware/FusionCompute réels
 ├── install/             scripts d'installation + README détaillé
 │   ├── check-prereqs.sh     diagnostic, ne modifie rien
 │   ├── setup-env.sh         crée v2fc/.env et génère les secrets
@@ -38,7 +41,7 @@ dans [`HANDOFF.md`](HANDOFF.md).
     ├── web/                 interface React
     ├── datamover/           drivers VDDK / vSphere / FusionCompute
     ├── relay/               écriture côté cible
-    ├── tools/               CLI (v2fc_source.py, vddk_probe.py, lab_report.py)
+    ├── tools/               CLI (v2fc_source.py, v2fc_runner.py, vddk_probe.py, lab_report.py)
     ├── lab/                 banc d'essai sans vCenter
     └── tests/               tests unitaires
 ```
@@ -128,7 +131,7 @@ git pull
 
 Toujours reconstruire après un `git pull` : un conteneur `api` non
 reconstruit sert l'ancien code (404 sur les nouvelles routes, cf.
-`HANDOFF.md` §17).
+`docs/dev/JOURNAL.md` §17).
 
 ## Déploiement sur une VM du cluster FusionCompute
 
@@ -141,7 +144,7 @@ FusionCompute ».
 
 ## Dépannage
 
-Voir `HANDOFF.md` §11 « Dépannage » : port déjà utilisé, API qui échoue à
+Voir `docs/dev/JOURNAL.md` §11 « Dépannage » : port déjà utilisé, API qui échoue à
 la première connexion Postgres (relancer `docker compose up -d api`),
 `JWT_SECRET non défini`, interface qui ne joint pas l'API, etc.
 

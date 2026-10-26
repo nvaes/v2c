@@ -1,6 +1,6 @@
 """
 Service runner (tools/v2fc_runner.py) — exécution automatique des rounds,
-ajoutée le 26/10/2026 à la demande de Nicolas (« ça doit être en
+ajoutée le 26/10/2026 à la demande de l'utilisateur (« ça doit être en
 automatique ») : plus de commande `job-run` à copier dans un terminal.
 
 Le runner demande ici quoi faire, puis lance `job-run` lui-même. Seul un
@@ -66,7 +66,7 @@ async def get_work(db: AsyncSession = Depends(get_db),
             continue
         if job.state == "SYNCED":
             # Delta seulement sur demande : bouton ou planificateur (26/10/2026,
-            # Nicolas ne veut pas de delta périodique automatique).
+            # l'utilisateur ne veut pas de delta périodique automatique).
             due = job.delta_scheduled_at is not None and job.delta_scheduled_at <= now
             if job.delta_requested or due:
                 work.append({"job_id": job.id, "round": "delta"})

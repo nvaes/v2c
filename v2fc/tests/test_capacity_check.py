@@ -23,7 +23,7 @@ class FakeClient:
         return {"vmConfig": {"disks": [{}] * self.relay_disks}}
 
 
-RELAY = SimpleNamespace(fc_vm_uri="/service/sites/S/vms/i-0000000D")
+RELAY = SimpleNamespace(fc_vm_uri="/service/sites/S/vms/i-00000013")
 PLAN_VM = SimpleNamespace(tgt_datastore_urn="5", tgt_datastore_name="LUN_TEST")
 
 

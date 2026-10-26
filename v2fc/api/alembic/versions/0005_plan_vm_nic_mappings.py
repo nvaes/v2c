@@ -1,7 +1,7 @@
 """mapping réseau par carte pour chaque VM d'un plan (26/10/2026).
 
-Demande de Nicolas : une VM source peut avoir plusieurs cartes réseau
-(R00vSkypeEd en a deux) ; chacune reçoit son propre réseau FusionCompute de
+Demande utilisateur : une VM source peut avoir plusieurs cartes réseau
+(VM-WIN-01 en a deux) ; chacune reçoit son propre réseau FusionCompute de
 destination. Liste JSON dans `plan_vms.nic_mappings` :
 `{device_key, label, adapter, mac, src_network, tgt_network_urn, tgt_network_name}`.
 `tgt_network_urn`/`tgt_network_name` restent (première carte mappée) pour

@@ -78,7 +78,7 @@ def make_client(monkeypatch, session: FakeSession, **kwargs) -> fc.FusionCompute
     session.on("POST", "/service/session",
               FakeResponse(headers={"X-Auth-Token": "TOKEN123"}, json_data={"validity": 600000}))
     session.on("GET", "/service/sites", SITE_RESPONSE)
-    return fc.FusionComputeClient("172.25.99.230", "admin", "secret", port=7443,
+    return fc.FusionComputeClient("192.0.2.10", "admin", "secret", port=7443,
                                   verify=False, **kwargs)
 
 
@@ -109,7 +109,7 @@ def test_login_failure_raises_with_server_detail(monkeypatch):
     session.on("POST", "/service/session",
               FakeResponse(status_code=400, json_data={"errorCode": "10100103"}))
     with pytest.raises(fc.FusionComputeError, match="10100103"):
-        fc.FusionComputeClient("172.25.99.230", "admin", "wrong", verify=False)
+        fc.FusionComputeClient("192.0.2.10", "admin", "wrong", verify=False)
 
 
 def test_missing_token_header_is_an_error(monkeypatch):
@@ -117,7 +117,7 @@ def test_missing_token_header_is_an_error(monkeypatch):
     monkeypatch.setattr(fc.requests, "Session", lambda: session)
     session.on("POST", "/service/session", FakeResponse(json_data={}))  # pas de X-Auth-Token
     with pytest.raises(fc.FusionComputeError, match="X-Auth-Token"):
-        fc.FusionComputeClient("172.25.99.230", "admin", "secret", verify=False)
+        fc.FusionComputeClient("192.0.2.10", "admin", "secret", verify=False)
 
 
 def test_close_calls_delete_session_and_swallows_errors(monkeypatch):
@@ -238,7 +238,7 @@ def test_wait_task_raises_on_failure(monkeypatch):
         client.wait_task("/service/sites/05C9108A/tasks/42", poll_interval=0)
 
 # --------------------------------------------------------------------------
-# Écriture cible (§7.5 ②③④⑤⑦, ajouté le 17/09/2026 — HANDOFF.md, socle L2)
+# Écriture cible (§7.5 ②③④⑤⑦, ajouté le 17/09/2026 — docs/dev/JOURNAL.md, socle L2)
 # --------------------------------------------------------------------------
 def test_create_and_attach_volume_sends_documented_fields(monkeypatch):
     session = FakeSession()
@@ -398,7 +398,7 @@ _OS_VERSIONS = {
 
 def test_pick_os_version_matches_real_source_vms():
     from datamover.fusioncompute import pick_os_version
-    # R00vSkypeEd et R00vSkype-OVOC, guestFullName vSphere réels
+    # VM-WIN-01 et VM-LNX-01, guestFullName vSphere réels
     assert pick_os_version(_OS_VERSIONS, "Microsoft Windows Server 2016 or later (64-bit)",
                            "windows9Server64Guest")[:2] == ("Windows", 1173)
     assert pick_os_version(_OS_VERSIONS, "CentOS 4/5/6 (64-bit)", "centos64Guest")[:2] \

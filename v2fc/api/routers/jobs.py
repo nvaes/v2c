@@ -1,28 +1,19 @@
 """
 Jobs de migration — machine à états (ARCHITECTURE.md §5) et exécution.
-Ajouté le 17/09/2026 à la demande explicite de Nicolas (onglets Migration
-et Logs), une fois L1 validé deux fois sur plateforme réelle (HANDOFF.md
-§5 sexies) : ESXi direct (15/09) et vCenter réel (17/09).
 
-Portée assumée de cette première version, documentée pour ne pas laisser
-croire à plus que ce qui est réellement câblé (voir HANDOFF.md pour le
-détail) :
-
-- Le round de synchronisation lui-même (lecture VDDK + écriture) tourne
-  toujours dans le Data Mover (conteneur Docker séparé, VDDK x86-64 —
-  l'API ne le charge pas, cf. api/Dockerfile) : `tools/v2fc_source.py
-  job-run` l'exécute et rapporte le résultat à cette API par callback HTTP
-  authentifié (même jeton JWT que l'UI web). Les identifiants source
-  restent fournis par Nicolas lui-même via V2FC_VC_PASSWORD, jamais par
-  cette API (§13 : jamais de secret en sortie) — exactement comme
-  aujourd'hui en CLI manuelle.
-- Le provisioning FusionCompute (`POST /jobs/{id}/provision`) appelle pour
-  de vrai `datamover.fusioncompute` (§7.5 ②) si un relais est assigné au
-  job. Sans relais assigné (aucun n'existe encore chez Nicolas au
-  17/09/2026), le provisioning passe directement en SEEDING sans créer de
-  volume réel — le round écrit alors dans le `--target-dir` local que
-  Nicolas fournit à `job-run`, exactement comme le POC L1 validé ce jour.
-  Voir `api/routers/relays.py` pour enregistrer un relais une fois déployé.
+- Provisioning (`POST /jobs/{id}/provision`) : vérifie l'espace du datastore
+  et les emplacements du relais, puis crée et attache un volume
+  FusionCompute par disque source à la VM relais.
+- Rounds (seed, delta, delta final) : exécutés par `tools/v2fc_source.py
+  job-run`, lancé automatiquement par le service runner
+  (`tools/v2fc_runner.py`, `api/routers/runner.py`) ; job-run obtient son
+  contexte ici (`run-context`) et rapporte avancement et résultat. Seul le
+  runner reçoit les identifiants source (§13).
+- Deltas : sur demande ou chaque jour à heure fixe, jamais périodiques.
+- Bascule (`cutover`) puis finalisation : arrêt de la source, delta final,
+  création de la VM cible et rattachement des volumes ; reprenable.
+- Sans relais (mode validation), aucun volume n'est créé et la page
+  Migration affiche la commande job-run à lancer à la main.
 """
 from __future__ import annotations
 
@@ -97,7 +88,7 @@ def _set_state(job: Job, new_state: str) -> None:
     # sur endpoints.last_probe_at (api/routers/endpoints.py) : asyncpg
     # refuse un datetime tz-aware sur une colonne naive ("can't subtract
     # offset-naive and offset-aware datetimes"), 500 sur toute transition
-    # d'état (confirmé le 17/09/2026 par Nicolas sur POST .../provision).
+    # d'état (confirmé le 17/09/2026 sur POST .../provision).
     job.state_since = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
@@ -508,7 +499,7 @@ async def report_round(job_id: uuid.UUID, round_id: uuid.UUID, body: JobRoundRep
     elif body.status == "failed":
         # §4 I5 : un job interrompu doit rester reprenable, pas retomber en
         # FAILED terminal pour un incident réseau — l'état ne bouge pas,
-        # Nicolas relance le même round (job-run est idempotent, cf. State).
+        # l'utilisateur relance le même round (job-run est idempotent, cf. State).
         pass
     elif round_row.kind == "FINAL":
         await _finalize(db, job)
@@ -527,7 +518,7 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
     sautée (volume déjà détaché, VM déjà créée, volume déjà attaché). En
     cas d'erreur, le job reste en FINALIZING avec l'erreur dans les logs.
 
-    Corrigé le 26/10/2026 au premier essai réel (R00vSkypeEd) : `osOptions`
+    Corrigé le 26/10/2026 au premier essai réel (VM-WIN-01) : `osOptions`
     obligatoire, CPU/mémoire/firmware repris de la source au lieu de valeurs
     par défaut, disques attachés en IDE (voir `_TARGET_PCI_TYPE`).
     """
@@ -672,7 +663,7 @@ async def retry_finalize(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 
 
 # ---------------------------------------------------------------------------
-# Bascule (Nicolas : étape 8, "migrate now")
+# Bascule (étape 8, « migrate now »)
 # ---------------------------------------------------------------------------
 @router.post("/{job_id}/cutover", response_model=JobOut)
 async def start_cutover(job_id: uuid.UUID, body: JobCutoverRequest,
@@ -717,7 +708,7 @@ async def rollback_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                        _user: User = Depends(require_role("operator"))) -> dict:
     """
     Rollback = rallumer la source (§4, invariant I1/promesse de rollback) —
-    jamais de suppression de la cible : Nicolas la nettoie lui-même s'il le
+    jamais de suppression de la cible : l'utilisateur la nettoie lui-même s'il le
     souhaite, ce driver ne détruit rien de sa propre initiative (I1).
     """
     job = await db.get(Job, job_id)

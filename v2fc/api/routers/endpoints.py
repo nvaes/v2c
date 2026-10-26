@@ -86,7 +86,7 @@ async def delete_endpoint(endpoint_id: uuid.UUID, db: AsyncSession = Depends(get
     endpoint mal configuré (mauvais port, faute de frappe) sans passer par la
     base directement. Refuse si un plan référence encore cet endpoint (source
     ou cible) plutôt que de laisser la contrainte de clé étrangère remonter
-    en 500 nu — Nicolas doit d'abord traiter ces plans, pas les perdre en
+    en 500 nu — L'utilisateur doit d'abord traiter ces plans, pas les perdre en
     silence.
     """
     endpoint = await db.get(Endpoint, endpoint_id)

@@ -36,7 +36,7 @@ fi
 if docker compose version >/dev/null 2>&1; then
   pass "docker compose (plugin v2) disponible"
 else
-  bad "docker compose indisponible — nécessaire pour la stack web (HANDOFF.md §11)"
+  bad "docker compose indisponible — nécessaire pour la stack web (docs/dev/JOURNAL.md §11)"
 fi
 
 if [ -f "$V2FC/.env" ]; then

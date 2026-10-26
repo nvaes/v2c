@@ -1,5 +1,5 @@
 """schéma initial — ARCHITECTURE.md §8.1 + compléments (users, credentials,
-plans, plan_vms) documentés dans HANDOFF.md et api/models.py.
+plans, plan_vms) documentés dans docs/dev/JOURNAL.md et api/models.py.
 
 Revision ID: 0001
 Revises:

@@ -11,7 +11,7 @@ import {
 } from "../api";
 
 /**
- * Étapes 3-5 du flux voulu par Nicolas (17/09/2026) : choisir un
+ * Étapes 3-5 du flux voulu (17/09/2026) : choisir un
  * environnement FusionCompute cible pour le plan, puis, pour chaque VM du
  * plan, choisir le datastore et le réseau de destination — un réseau par
  * carte réseau de la VM source (26/10/2026, cartes lues sur le vCenter).

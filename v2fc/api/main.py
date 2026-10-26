@@ -1,8 +1,8 @@
 """
 Orchestrateur V2FC — API REST (ARCHITECTURE.md §9) : authentification,
 gestion des endpoints (vCenter/ESXi/FusionCompute), inventaire, plans,
-relais et jobs de migration (§5, ajoutés le 17/09/2026 — HANDOFF.md,
-socle L2 demandé explicitement par Nicolas une fois L1 validé deux fois
+relais et jobs de migration (§5, ajoutés le 17/09/2026 — docs/dev/JOURNAL.md,
+socle L2 demandé explicitement une fois L1 validé deux fois
 sur plateforme réelle).
 """
 from __future__ import annotations

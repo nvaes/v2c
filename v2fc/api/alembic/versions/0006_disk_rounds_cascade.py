@@ -1,6 +1,6 @@
 """disk_rounds.job_disk_id en ON DELETE CASCADE (26/10/2026).
 
-Trouvé par Nicolas en supprimant PLAN1 (500) : supprimer un job cascade sur
+Trouvé en supprimant un plan réel (500) : supprimer un job cascade sur
 job_disks et sync_rounds, mais disk_rounds référençait job_disks sans
 cascade — dès qu'un round avait été rapporté, la suppression échouait
 (ForeignKeyViolation disk_rounds_job_disk_id_fkey). C'était la seule clé

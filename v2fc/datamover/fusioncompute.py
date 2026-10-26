@@ -1,42 +1,23 @@
 """
-Driver cible FusionCompute — API REST du VRM (ARCHITECTURE.md §7.5, D2
-résolu le 17/09/2026).
+Driver cible FusionCompute — API REST du VRM (ARCHITECTURE.md §7.5).
 
-Rien ici n'est deviné : chaque chemin, en-tête et champ de réponse vient de
-la documentation constructeur *FusionCompute 8.10.0 VRM APIs* fournie par
-Nicolas (fichier interne, archivé dans docs-fusioncompute/, voir HANDOFF.md
-§12 et ARCHITECTURE.md §7.5 pour les citations détaillées).
+Chemins, en-têtes et champs viennent de la documentation constructeur
+*FusionCompute 8.10.0 VRM APIs* (non redistribuée, voir ARCHITECTURE.md
+§7.5), complétée par ce qui a été constaté sur un VRM réel et noté dans les
+docstrings (URN de datastore nue, `osOptions` obligatoire, série virtio =
+UUID du volume, codes d'erreur traduits...).
 
-Portée de ce module : connexion/session, découverte en lecture seule
-(sites, clusters, hôtes, datastores, DVS, port groups — étapes 3 à 5 du
-flux voulu par Nicolas), et depuis le 17/09/2026 (Nicolas a demandé le
-socle L2 complet en une fois — HANDOFF.md §5 sexies/L2) l'écriture cible
-(§7.5 ②③④⑤⑦) : création+attachement de volume, détachement, création de
-VM avec firmware imposé, démarrage/arrêt de VM. Appelant réel :
-`api/routers/jobs.py` (machine à états du job, ARCHITECTURE.md §5).
+Portée : session (port 7443, compte d'interconnexion, mot de passe haché
+SHA-256), découverte (sites, hôtes, datastores, réseaux, VM, types d'OS) et
+écriture : création/attachement/détachement/suppression de volumes,
+création de VM, démarrage/arrêt. Toutes les opérations d'écriture sont
+asynchrones : l'appelant attend la tâche (`wait_task`). Le transport des
+données ne passe pas par ici : le Data Mover écrit directement sur les
+volumes attachés à la VM relais.
 
-Ce que ce module NE fait PAS, et qui reste un vrai manque non inventé ici :
-il n'existe encore aucun agent réseau tournant à l'intérieur d'une VM
-relais FusionCompute pour recevoir les extents envoyés par le Data Mover
-(§7.1, §13 « orchestrateur ↔ agents : gRPC sur mTLS ») — ce module ne crée
-que les volumes/VM côté VRM, il ne transporte aucune donnée. Tant qu'aucune
-VM relais réelle n'existe chez Nicolas, `provision()`/`create_vm()` ne
-peuvent pas être exercés contre un vrai VRM, exactement comme le driver de
-lecture ne l'a été qu'après le lab du 17/09/2026 — voir HANDOFF.md pour
-l'état d'avancement réel de ce test.
-
-Points non vérifiés en laboratoire, à confirmer avant mise en production
-(voir ARCHITECTURE.md §7.5 « Ce qui reste à vérifier ») :
-  - le port réel de l'API REST (le document dit 7443 ; l'adresse VRM
-    donnée par Nicolas utilise 8443, vraisemblablement le port console) ;
-  - la forme exacte du hachage du mot de passe : le document dit seulement
-    « haché SHA-256 par défaut » sans préciser encodage/casse/sel — on
-    utilise ici l'hypothèse la plus directe (SHA-256 hexadécimal minuscule
-    du mot de passe UTF-8), NON confirmée sur ce lab ;
-  - la clé exacte de la réponse de listage des port groups : le tableau de
-    description du document dit `portGroups`, mais son propre exemple de
-    réponse JSON dit `portgroups` (incohérence documentaire, comme celle
-    déjà relevée en §7.4 sur la limite SCSI) — ce module accepte les deux.
+Incohérence documentaire gérée : la clé de listage des port groups est
+`portGroups` dans le tableau du document mais `portgroups` dans son
+exemple — les deux sont acceptées.
 """
 from __future__ import annotations
 
@@ -74,9 +55,9 @@ def _urn_tail(urn: str) -> str:
 
 
 def _full_urn(site_id: str, kind: str, urn: str) -> str:
-    """« 5 » -> « urn:sites:0A7D0FDA:datastores:5 » ; une URN complète passe telle quelle.
+    """« 5 » -> « urn:sites:5A1E0001:datastores:5 » ; une URN complète passe telle quelle.
 
-    Constaté le 26/10/2026 sur le VRM de Nicolas : `GET <host_uri>/<id>/datastores`
+    Constaté le 26/10/2026 sur un VRM réel : `GET <host_uri>/<id>/datastores`
     renvoie `"urn": "5"` (identifiant nu), alors que `GET <site>/datastores/5`
     renvoie l'URN complète — et `createattachvol` refuse l'identifiant nu
     (`10000001`, « format de requête invalide »).
@@ -87,8 +68,8 @@ def _full_urn(site_id: str, kind: str, urn: str) -> str:
 def guest_disk_path(volume_uuid: str) -> str:
     """
     Chemin stable, dans la VM relais, d'un volume attaché en VIRTIO (bus par
-    défaut de `createattachvol`). D5 tranché le 26/10/2026 sur le VRM de
-    Nicolas : FusionCompute passe l'UUID du volume comme numéro de série
+    défaut de `createattachvol`). D5 tranché le 26/10/2026 sur un VRM
+    réel : FusionCompute passe l'UUID du volume comme numéro de série
     virtio, tronqué à 20 caractères — volume 61172379-913f-4377-a541-...
     vu comme /dev/disk/by-id/virtio-61172379-913f-4377-a -> /dev/vdb.
     Aucune déduction par ordre d'attachement (vdb, vdc...) : ce lien
@@ -367,7 +348,7 @@ class FusionComputeClient:
     def list_networks(self) -> list[dict]:
         """
         Réseaux virtuels = port groups de tous les DVS du site (un « réseau »
-        FusionCompute au sens où l'entend Nicolas, §9 étape 5), chacun
+        FusionCompute au sens du flux de migration, §9 étape 5), chacun
         annoté du DVS auquel il appartient pour l'affichage.
         """
         out = []

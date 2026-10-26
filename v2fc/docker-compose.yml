@@ -3,7 +3,7 @@
 # demande depuis la CLI (v2fc_source.py), monté avec le VDDK et
 # --platform linux/amd64, pas comme service permanent.
 #
-# Démarrage détaillé : voir HANDOFF.md §11. En résumé :
+# Démarrage détaillé : voir docs/dev/JOURNAL.md §11. En résumé :
 #   cp .env.example .env   # puis éditer JWT_SECRET / V2FC_KEK (commandes dans .env.example)
 #   docker compose build
 #   docker compose up -d postgres redis

@@ -44,7 +44,7 @@ export default function InventoryPage() {
   useEffect(() => load(), [id]);
 
   // Poll la progression pendant qu'un scan tourne (GET .../inventory/progress,
-  // demande de Nicolas du 17/09/2026) — purement indicatif : la réponse de
+  // demande utilisateur du 17/09/2026) — purement indicatif : la réponse de
   // getInventory ci-dessus reste la seule source de vérité sur la fin du scan,
   // ce poll s'arrête tout seul dès que `loading` repasse à false.
   useEffect(() => {

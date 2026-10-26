@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # V2FC — prépare v2fc/.env (secrets JWT_SECRET / V2FC_KEK).
-# Reprend exactement la procédure validée dans HANDOFF.md §11 point 1.
+# Reprend exactement la procédure validée dans docs/dev/JOURNAL.md §11 point 1.
 # N'écrase jamais un .env existant : relancer ce script sur une installation
 # déjà configurée ne touche à rien.
 set -euo pipefail

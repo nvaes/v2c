@@ -162,7 +162,7 @@ class _Progress:
     """
     Ligne de progression pendant le transfert d'un disque, réaffichée sur
     place (`\r`). Sans elle, un cycle de plusieurs minutes ne donne aucun
-    signe de vie tant que le disque n'est pas terminé — ce que Nicolas a
+    signe de vie tant que le disque n'est pas terminé — ce qui a été
     signalé le 15/09/2026 lors du premier cycle réel.
 
     Rafraîchit au plus toutes les `interval` secondes pour ne pas ralentir
@@ -269,7 +269,7 @@ def cmd_sync(args, stats: dict | None = None) -> int:
             def _probe_open(c, _path=disks[0].file_name):
                 # ConnectEx réussit pour n'importe quelle forme de vmxSpec ;
                 # seul VixDiskLib_Open révèle si elle convient vraiment
-                # (HANDOFF §5 quater). On le vérifie ici plutôt que de
+                # (journal §5 quater). On le vérifie ici plutôt que de
                 # découvrir le rejet au milieu du cycle d'écriture.
                 with c.open(_path):
                     pass
@@ -412,15 +412,15 @@ def cmd_cleanup(args) -> int:
 
 # --------------------------------------------------------------------------
 # job-run — exécute un round pour un job piloté par l'API (ajouté le
-# 17/09/2026, socle L2, HANDOFF.md §5 sexies). Ne réimplémente rien : c'est
+# 17/09/2026, socle L2, docs/dev/JOURNAL.md §5 sexies). Ne réimplémente rien : c'est
 # un appelant supplémentaire de `cmd_sync`, exactement comme la CLI
 # manuelle, avec deux différences seulement :
 #   1. le contexte (VM, round à faire) vient de l'API plutôt que de
 #      --uuid/--round tapés à la main ;
 #   2. le résultat est rapporté à l'API (état du job, journal) en plus
 #      d'être affiché dans ce terminal.
-# Les identifiants source restent fournis par Nicolas via V2FC_VC_PASSWORD
-# (jamais par l'API — §13) : rien ne change à cette discipline.
+# Les identifiants source arrivent par V2FC_VC_USER/V2FC_VC_PASSWORD : posés
+# par le runner (seul à les recevoir de l'API, §13) ou par l'opérateur.
 # --------------------------------------------------------------------------
 class _ApiLogHandler(logging.Handler):
     """

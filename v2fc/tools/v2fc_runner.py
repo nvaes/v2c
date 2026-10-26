@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Runner V2FC — exécute les rounds de migration sans intervention (ajouté le
-26/10/2026, à la demande de Nicolas : « ça doit être en automatique »).
+26/10/2026, à la demande de l'utilisateur : « ça doit être en automatique »).
 
 Tourne dans le service `runner` de docker-compose.yml, sur la VM relais
 elle-même (accès à /dev pour les volumes FusionCompute attachés) avec le

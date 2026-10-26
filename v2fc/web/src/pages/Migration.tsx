@@ -5,8 +5,8 @@ import {
 } from "../api";
 import { useRunnerStatus } from "../RunnerBadge";
 
-// États où un round s'exécute côté Data Mover (job-run, dans le terminal
-// de Nicolas — cette UI ne peut pas le lancer elle-même, cf. HANDOFF.md :
+// États où un round s'exécute côté Data Mover (job-run, lancé par le runner ;
+// à la main seulement pour un job sans relais —
 // le VDDK tourne dans un conteneur Docker séparé, pas dans l'API).
 const ROUND_KIND_FOR_STATE: Record<string, "seed" | "delta" | "final" | undefined> = {
   SEEDING: "seed",
@@ -159,7 +159,7 @@ export default function MigrationPage() {
 
   useEffect(refresh, []);
   // Rafraîchit périodiquement : l'état d'un job avance depuis le terminal
-  // de Nicolas (job-run) ou depuis des actions serveur (provision, cutover),
+  // de l'utilisateur (job-run) ou depuis des actions serveur (provision, cutover),
   // pas seulement depuis cette page.
   useEffect(() => {
     const t = setInterval(refresh, 5000);

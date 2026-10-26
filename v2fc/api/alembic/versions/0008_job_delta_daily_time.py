@@ -1,6 +1,6 @@
 """planificateur de delta : une heure par jour, en heure locale (26/10/2026).
 
-Nicolas : « met juste à quelle heure chaque jour ». Remplace la date +
+Demande utilisateur : « juste l'heure, chaque jour ». Remplace la date +
 case « chaque jour » de la 0007 :
 - `delta_daily_time` « HH:MM » et `delta_timezone` (IANA, celui du
   navigateur) : l'heure suit l'heure locale, changements d'heure compris ;

@@ -5,7 +5,7 @@ plutôt que d'en faire un faux-async — pyVmomi ne sait de toute façon pas
 attendre autre chose qu'un thread bloqué.
 
 Rien ici n'invente de comportement vSphere : c'est une fine couche au-dessus
-du driver source déjà éprouvé sur ESXi réel (HANDOFF.md §5 quinquies).
+du driver source déjà éprouvé sur ESXi réel (docs/dev/JOURNAL.md §5 quinquies).
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def inventory(host: str, user: str, password: str, port: int, verify_tls: bool,
     scan (api/cache.py, `set_inventory_progress_sync`) — lue par la route de
     poll `GET /endpoints/{id}/inventory/progress` pendant que cet appel,
     potentiellement long, tourne dans son thread bloquant (demande de
-    Nicolas du 17/09/2026 : un statut d'avancement pendant l'inventaire).
+    l'utilisateur du 17/09/2026 : un statut d'avancement pendant l'inventaire).
     Optionnel (`None` par défaut) pour ne pas exiger un contexte d'endpoint
     d'un appel direct sans route HTTP (tests, CLI future) : dans ce cas,
     aucune publication n'a lieu.

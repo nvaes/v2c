@@ -1,18 +1,19 @@
-# V2FC — Dossier de reprise de session
+# V2FC — Journal technique
 
-**À lire en premier par toute nouvelle session Claude reprenant ce projet.**
-
-Ce document est autonome : il ne suppose ni accès à la conversation
-précédente, ni mémoire, ni projet partagé. Tout ce qui compte est sur le
-disque, dans `~/Downloads/APP/`.
+Historique de développement destiné à la maintenance : décisions,
+constats sur des plateformes VMware et FusionCompute réelles (codes
+d'erreur, comportements non documentés), corrections. Les noms de machines,
+de sites et les adresses ont été anonymisés. Pour l'utilisation, voir
+[`docs/GUIDE-UTILISATEUR.md`](../GUIDE-UTILISATEUR.md) ; pour l'installation,
+[`install/README.md`](../../install/README.md).
 
 | | |
 |---|---|
 | Projet | Application web de migration VMware vSphere → Huawei FusionCompute |
-| Porteur | Nicolas, Nvaestech SRL (Belgique) — architecte solutions stockage/virtualisation/sauvegarde |
+| Porteur | Nvaestech SRL (Belgique) — architecte solutions stockage/virtualisation/sauvegarde |
 | Langue de travail | français, registre technique, interlocuteur expert |
 | État au | 17/09/2026 |
-| Avancement | **L1 (lecture source) validé deux fois sur plateforme réelle** : ESXi direct (15/09/2026, §5 quinquies) et **vCenter réel** (17/09/2026, §5 sexies — 172.16.0.245, cluster Labouptime, seed+delta réels, repli `moref` confirmé via vCenter). Écriture réelle vers FusionCompute non testée — voir la discordance signalée au §5 sexies sur le critère de sortie de L1 (`ARCHITECTURE.md` §14). Défaut trouvé et non corrigé : `remove_snapshot()` peut sauter silencieusement le nettoyage si la connexion est déjà rompue (§5 sexies). **L0b (socle web, partie source) clos** (16/09/2026, testé de bout en bout par Nicolas — §11). **D2 résolu** (17/09/2026, §12) : API REST FusionCompute documentée avec citation de source. **Driver cible FusionCompute (lecture) écrit le 17/09/2026** (§13) : connexion VRM, listage datastores/réseaux, exposé côté API et UI web — **non encore testé contre le lab réel** (aucun outil de cette session n'atteint 172.25.99.230, voir §10) ; c'est le test que Nicolas doit faire ensuite. Écriture (volumes, VM cible, copie) toujours non commencée. **Dossier `install/` ajouté le 17/09/2026** pour la livraison finale (packaging web + Data Mover/VDDK), à maintenir à jour — voir `install/README.md`. **Socle L2 (jobs, onglets Migration/Logs) construit le 17/09/2026** (§16), non exercé contre un relais réel (aucun relais en place). Bug remonté par Nicolas le 17/09/2026 soir sur le mapping cible + 404 Migration/Logs, diagnostiqué et corrigé le jour même (§17) : un vrai bug côté UI (mapping) corrigé dans le code, et un conteneur `api` à reconstruire côté Nicolas (`docker compose build api && docker compose up -d api`) pour les 404 — reconstruction qui a révélé un second vrai bug (`relay/` absent de `api/Dockerfile`, corrigé le jour même, voir §17). **Décision d'architecture prise le 17/09/2026 (nuit)** (§18) : le relais est une VM applicative colocalisée dans le cluster FusionCompute, pas un agent réseau séparé — ARCHITECTURE.md mis à jour (D7). |
+| Avancement | **L1 (lecture source) validé deux fois sur plateforme réelle** : ESXi direct (15/09/2026, §5 quinquies) et **vCenter réel** (17/09/2026, §5 sexies — 192.0.2.20, cluster LabCluster, seed+delta réels, repli `moref` confirmé via vCenter). Écriture réelle vers FusionCompute non testée — voir la discordance signalée au §5 sexies sur le critère de sortie de L1 (`ARCHITECTURE.md` §14). Défaut trouvé et non corrigé : `remove_snapshot()` peut sauter silencieusement le nettoyage si la connexion est déjà rompue (§5 sexies). **L0b (socle web, partie source) clos** (16/09/2026, testé de bout en bout — §11). **D2 résolu** (17/09/2026, §12) : API REST FusionCompute documentée avec citation de source. **Driver cible FusionCompute (lecture) écrit le 17/09/2026** (§13) : connexion VRM, listage datastores/réseaux, exposé côté API et UI web — **non encore testé contre le lab réel** (aucun outil de cette session n'atteint 192.0.2.10, voir §10) ; c'est le test que l'utilisateur doit faire ensuite. Écriture (volumes, VM cible, copie) toujours non commencée. **Dossier `install/` ajouté le 17/09/2026** pour la livraison finale (packaging web + Data Mover/VDDK), à maintenir à jour — voir `install/README.md`. **Socle L2 (jobs, onglets Migration/Logs) construit le 17/09/2026** (§16), non exercé contre un relais réel (aucun relais en place). Bug remonté en test le 17/09/2026 soir sur le mapping cible + 404 Migration/Logs, diagnostiqué et corrigé le jour même (§17) : un vrai bug côté UI (mapping) corrigé dans le code, et un conteneur `api` à reconstruire côté l'utilisateur (`docker compose build api && docker compose up -d api`) pour les 404 — reconstruction qui a révélé un second vrai bug (`relay/` absent de `api/Dockerfile`, corrigé le jour même, voir §17). **Décision d'architecture prise le 17/09/2026 (nuit)** (§18) : le relais est une VM applicative colocalisée dans le cluster FusionCompute, pas un agent réseau séparé — ARCHITECTURE.md mis à jour (D7). |
 
 ---
 
@@ -26,7 +27,7 @@ Migrer des VM de VMware vSphere vers Huawei FusionCompute, en trois temps :
 3. **Dernier delta à froid** — la VM source est éteinte, le dernier écart est
    transféré, la cible démarre.
 
-Exigence structurante posée par Nicolas dès le départ : **la VM source n'est
+Exigence structurante posée par l'utilisateur dès le départ : **la VM source n'est
 jamais supprimée**, pour qu'un rollback consiste simplement à la rallumer.
 
 ---
@@ -39,7 +40,7 @@ jamais supprimée**, pour qu'un rollback consiste simplement à la rallumer.
 | — | Écriture FusionCompute | **VM relais + agent** : volumes cibles attachés en SCSI à une VM relais dans le cluster FC, agent écrivant par `pwrite()` aux offsets exacts. N'utilise que l'API REST VRM documentée. |
 | — | Stack applicative | FastAPI + React + PostgreSQL/Redis |
 | **D1** | Plateforme du Data Mover | **RÉSOLU** — VDDK Linux x86-64 validé, liaison `ctypes` fonctionnelle. Pas de composant Windows. |
-| **D2** | Chemins de l'API REST FusionCompute | **OUVERT, BLOQUANT.** Nicolas a l'accès support Huawei et doit fournir le *FusionCompute Interface Reference* de la version cible. **Aucun chemin d'endpoint n'a été inventé, ne pas en inventer.** |
+| **D2** | Chemins de l'API REST FusionCompute | **OUVERT, BLOQUANT.** L'utilisateur a l'accès support Huawei et doit fournir le *FusionCompute Interface Reference* de la version cible. **Aucun chemin d'endpoint n'a été inventé, ne pas en inventer.** |
 | **D3** | Version vSphere source | **RÉSOLU pour le labo** — ESXi 8.0.3 build 24022510, Enterprise Plus. Même version que le VDDK. À reposer pour chaque plateforme cliente. |
 | **D4** | Version FusionCompute cible | Ouvert — conditionne la préparation invité et la limite de disques par VM. |
 | **D5** | Appariement volume FC ↔ `/dev/sdX` dans le relais | Ouvert — à trancher en laboratoire FusionCompute. Détermine si l'attachement peut être parallèle ou doit rester séquentiel. |
@@ -56,7 +57,7 @@ listés au §12 de `ARCHITECTURE.md`.
 ~/Downloads/APP/
 ├── ARCHITECTURE.md                 ← dossier de conception, v0.6, ~56 Ko
 │                                     LE document de référence. Tout y est.
-├── HANDOFF.md                      ← ce fichier
+├── docs/dev/JOURNAL.md                      ← ce fichier
 ├── v2fc/                           ← le code, ~4000 lignes
 │   ├── README.md                   vue d'ensemble et démarrage
 │   ├── LAB.md                      mode opératoire du relevé sur ESXi
@@ -103,7 +104,7 @@ local ouvert par le transport `file`) — tous les contrôles passent :
 
 **61 tests unitaires** passent sans vCenter (`python3 -m pytest tests/ -q`).
 
-**Sur l'ESXi réel** (172.25.100.91, ESXi 8.0.3, VM de test `ubuntu` 25 Gio EFI) :
+**Sur l'ESXi réel** (192.0.2.30, ESXi 8.0.3, VM de test `ubuntu` 25 Gio EFI) :
 inventaire, pré-vérifications, activation CBT, snapshot, `QueryChangedDiskAreas`
 et empreinte de certificat fonctionnent. Mesures au §2.6 de `ARCHITECTURE.md`.
 
@@ -150,7 +151,7 @@ cd ~/Downloads/APP
 docker build --platform linux/amd64 -t v2fc-datamover v2fc/
 docker run --rm -it --platform linux/amd64 \
   -v "$PWD/vmware-vix-disklib-distrib:/opt/vddk:ro" -v "$PWD/lab-out:/out" \
-  -e V2FC_VC_HOST=172.25.100.91 -e V2FC_VC_USER=root v2fc-datamover \
+  -e V2FC_VC_HOST=192.0.2.30 -e V2FC_VC_USER=root v2fc-datamover \
   python3 /work/tools/lab_report.py --vm ubuntu --insecure \
           --transport nbdssl:nbd -o /out/mesure.json
 ```
@@ -220,7 +221,7 @@ Vérification faite dans ce bac à sable : syntaxe compilée
 existant couplé à `_open_strategies` ou `absolute_disk_path` (recherché dans
 `tests/`, aucune occurrence). **La suite `pytest` complète n'a pas été
 relancée ici** (pas de `pyVmomi` ni de Docker dans ce bac à sable) — à
-relancer par Nicolas si souhaité, mais la validation qui compte est le
+relancer par l'utilisateur si souhaité, mais la validation qui compte est le
 relevé réel sur l'ESXi, prochaine étape immédiate.
 
 **Prochaine commande à lancer** (identique à celle du §5, elle réutilisera
@@ -231,7 +232,7 @@ cd ~/Downloads/APP
 docker build --platform linux/amd64 -t v2fc-datamover v2fc/
 docker run --rm -it --platform linux/amd64 \
   -v "$PWD/vmware-vix-disklib-distrib:/opt/vddk:ro" -v "$PWD/lab-out:/out" \
-  -e V2FC_VC_HOST=172.25.100.91 -e V2FC_VC_USER=root v2fc-datamover \
+  -e V2FC_VC_HOST=192.0.2.30 -e V2FC_VC_USER=root v2fc-datamover \
   python3 /work/tools/lab_report.py --vm ubuntu --insecure \
           --transport nbdssl:nbd -o /out/mesure.json
 ```
@@ -319,7 +320,7 @@ cd ~/Downloads/APP
 docker build --platform linux/amd64 -t v2fc-datamover v2fc/
 docker run --rm -it --platform linux/amd64 \
   -v "$PWD/vmware-vix-disklib-distrib:/opt/vddk:ro" -v "$PWD/lab-out:/out" \
-  -e V2FC_VC_HOST=172.25.100.91 -e V2FC_VC_USER=root v2fc-datamover \
+  -e V2FC_VC_HOST=192.0.2.30 -e V2FC_VC_USER=root v2fc-datamover \
   python3 /work/tools/lab_report.py --vm ubuntu --insecure \
           --transport nbdssl:nbd -o /out/mesure.json
 ```
@@ -354,7 +355,7 @@ général. `tools/lab_report.py` essaie donc toujours les deux formes et
 consigne laquelle a fonctionné (`mesure.vmx_spec_accepted`), plutôt que de
 supposer `moref` acquis pour toute plateforme cliente future.
 
-**Décision à prendre avec Nicolas, pas encore tranchée :** `SourceVm.vmx_spec`
+**Décision à prendre avec l'utilisateur, pas encore tranchée :** `SourceVm.vmx_spec`
 dans `datamover/vsphere.py` — utilisé par `tools/v2fc_source.py` et le
 driver de production, pas seulement par l'outil de lab — construit encore
 la forme `dcPath/dsName` qui vient de se révéler non fonctionnelle ici.
@@ -393,7 +394,7 @@ corrigés dans la foulée :
    convient pas). `cmd_sync` lui passe une sonde qui ouvre puis referme
    immédiatement le premier disque réel avant de se lancer dans le cycle.
 
-**Fonctionnalité ajoutée à la demande de Nicolas** : une classe `_Progress`
+**Fonctionnalité ajoutée à la demande de l'utilisateur** : une classe `_Progress`
 dans `tools/v2fc_source.py` affiche une ligne de progression réactualisée en
 place (`\r`) pendant le transfert — pourcentage, Mio faits/total, débit
 instantané, tranche en cours, ETA — rafraîchie au plus toutes les 2 s.
@@ -423,11 +424,11 @@ toujours été vérifié qu'en connexion directe à l'hôte, jamais via vCenter
 
 Le §5 quinquies avait clos L1 sur ESXi en connexion directe, mais laissait
 un point ouvert : « `moref=` n'a toujours été vérifié qu'en connexion
-directe à l'hôte, jamais via vCenter ». Nicolas a validé ce point ce jour,
+directe à l'hôte, jamais via vCenter ». L'utilisateur a validé ce point ce jour,
 en lançant le CLI de production (`tools/v2fc_source.py`, via Docker
 `--platform linux/amd64` sur son Mac Apple Silicon) contre son vCenter réel
-(172.16.0.245, VMware vCenter Server 8.0.3 build 25197330, cluster
-« Labouptime », 228 VM).
+(192.0.2.20, VMware vCenter Server 8.0.3 build 25197330, cluster
+« LabCluster », 228 VM).
 
 **Premier essai, `todelete2` (2 disques, 80 + 50 Gio)** — `preflight`,
 activation automatique du CBT, `provision`, puis `sync --round seed` :
@@ -435,7 +436,7 @@ CBT réel via `QueryAllocatedBlocks` (191 zones → 6988 tranches sur le
 premier disque, 33,65 % de 80 Gio alloués), transport `nbdssl` négocié,
 transfert commencé. Interrompu à 0,4 % (29/6988 tranches, 2,7 Mio/s) par
 une coupure réseau réelle entre le conteneur Docker (Rosetta) et
-172.16.0.245 (`SSL: Unknown SSL Error` puis `NFC_NETWORK_ERROR`, suivi
+192.0.2.20 (`SSL: Unknown SSL Error` puis `NFC_NETWORK_ERROR`, suivi
 d'une connexion SOAP vCenter séparée qui est tombée aussi
 `SHUTDOWN_WHILE_IN_INIT`, puis d'un `ConnectionRefusedError` TCP sur la
 tentative suivante) — le réseau est revenu de lui-même quelques minutes
@@ -466,7 +467,7 @@ ensuite à la main via `tools/v2fc_source.py cleanup --name todelete2`. Ce
 défaut peut se reproduire dès que la connexion vCenter est déjà tombée au
 moment du nettoyage — à corriger (par ex. capturer `self.name` dans une
 variable avant la tentative de connexion, ou l'omettre du message en cas
-d'échec) ; pas fait ce jour, Nicolas ne l'a pas encore demandé.
+d'échec) ; pas fait ce jour, l'utilisateur ne l'a pas encore demandé.
 
 **Second essai, `test_ubuntu`** (1 disque, 4,0 Gio, EFI, `ubuntu64Guest`,
 sous tension) — choisi pour un test à petit disque, dans un sous-dossier
@@ -496,7 +497,7 @@ dossier plat sinon, même risque de collision) :
   utilisé dans les deux rounds ; `hotadd` reste listé comme disponible par
   le VDDK mais n'est pas réellement exerçable depuis ce poste (il exige que
   l'hôte lecteur soit lui-même une VM du cluster source, ce qui n'est pas
-  le cas d'un conteneur Docker sur le Mac de Nicolas — pas un défaut, une
+  le cas d'un conteneur Docker sur le poste de développement — pas un défaut, une
   limite du banc d'essai actuel).
 
 **Ce que ça change pour L1** : le maillon critique (VDDK + CBT + agent
@@ -514,7 +515,7 @@ fichier brut local via `relay/writer.py` (le POC ne prétend pas plus, voir
 (§13, partie lecture seule). Donc, au sens strict de ce critère de sortie
 tel qu'écrit, L1 n'est pas encore clos — seule sa moitié « lecture source »
 l'est, deux fois. `ARCHITECTURE.md` a été annoté en conséquence (§14) sans
-trancher la question à la place de Nicolas : soit redéfinir le critère de
+trancher la question à la place de l'utilisateur : soit redéfinir le critère de
 sortie de L1 pour qu'il ne porte que sur la lecture source (ce qui
 correspond à ce qui a été réellement demandé et testé jusqu'ici), soit
 considérer que L1 ne sera formellement clos qu'une fois un test d'écriture
@@ -598,14 +599,14 @@ mécaniquement, pas par convention (§4 de `ARCHITECTURE.md`).
 |---|---|---|
 | L1 | POC du maillon critique | **Clos** (§5 quinquies) : cycle complet **seed et delta** réussi avec le driver de production sur l'ESXi de lab — 25 Gio, `changeId` correct d'un round à l'autre, snapshot toujours nettoyé. Écriture côté FusionCompute non commencée. |
 | L0a | Driver source vSphere | Fait, éprouvé sur ESXi réel — inventaire, CBT, snapshot, lecture VDDK **et écriture du cycle complet via `v2fc_source.py sync`** |
-| L0b | Socle web : FastAPI, PostgreSQL, Redis, auth/RBAC, docker-compose, schéma du §8, machine à états, progression WebSocket | **Clos pour la partie déjà en portée** (§11) : stack Docker complète testée par Nicolas contre l'ESXi de lab — connexion, inventaire, sélection multi-VM, plan, pré-vérification, tout validé dans le navigateur. Machine à états et progression WebSocket pas encore abordées : elles viendront avec l'exécution des jobs (L2) |
+| L0b | Socle web : FastAPI, PostgreSQL, Redis, auth/RBAC, docker-compose, schéma du §8, machine à états, progression WebSocket | **Clos pour la partie déjà en portée** (§11) : stack Docker complète testée par l'utilisateur contre l'ESXi de lab — connexion, inventaire, sélection multi-VM, plan, pré-vérification, tout validé dans le navigateur. Machine à états et progression WebSocket pas encore abordées : elles viendront avec l'exécution des jobs (L2) |
 | — | Driver cible FusionCompute | **Partie lecture écrite le 17/09/2026** (§13) : `datamover/fusioncompute.py` (connexion, sites, clusters, hôtes, datastores, DVS/port groups), exposée par `api/fusioncompute_bridge.py` et deux routes (`/endpoints/{id}/datastores`, `/networks`), avec écran web de mapping par VM. **Non testé contre le lab réel** — voir §13. Écriture (créer/attacher un volume, créer la VM cible) non commencée : viendra avec L2, une fois le relais existant. |
 | L2 | Cycle complet avec reprise | Non commencé |
 | L3 | Bascule + `virt-v2v --in-place` + rollback | Non commencé |
 | L4 | UI, plans multi-VM, pool de relais | Non commencé |
 | L5 | Durcissement | Non commencé |
 
-Nicolas avait choisi de faire le driver vSphere avant le socle web, et a
+L'utilisateur avait choisi de faire le driver vSphere avant le socle web, et a
 fourni la documentation *FusionCompute Interface Reference* (VRM APIs) le
 17/09/2026 — voir §12.
 
@@ -620,7 +621,7 @@ connecté :
 > VMware vSphere vers Huawei FusionCompute. Le dossier `~/Downloads/APP` est
 > connecté.
 >
-> Lis d'abord `APP/HANDOFF.md` — c'est le dossier de reprise, il explique où
+> Lis d'abord `APP/docs/dev/JOURNAL.md` — c'est le dossier de reprise, il explique où
 > en est le projet, ce qui est prouvé, et le point de blocage actuel. Lis
 > ensuite `APP/ARCHITECTURE.md`, qui est le document de conception de
 > référence, en particulier les §2 (pièges déjà payés), §4 (invariants) et
@@ -631,7 +632,7 @@ connecté :
 > chiffres : signale ce que tu ne sais pas. Quand tu affirmes qu'un truc
 > marche, montre-le en l'exécutant.
 >
-> Le point de blocage est décrit au §5 du HANDOFF. Commence par là.
+> Le point de blocage est décrit au §5 du journal. Commence par là.
 
 ---
 
@@ -644,9 +645,9 @@ connecté :
   n'est pas une alternative.
 - Le bac à sable cloud de Claude et la VM Linux du pont n'ont **aucune route
   vers le réseau local** (loopback seul, tout passe par un proxy HTTP). Tout
-  test contre l'ESXi doit donc être lancé par Nicolas depuis son Mac. Ne pas
+  test contre l'ESXi doit donc être lancé par l'utilisateur depuis son Mac. Ne pas
   lui demander d'identifiants : ils seraient inutilisables.
-- Nicolas fournit les identifiants ESXi par variables d'environnement et
+- L'utilisateur fournit les identifiants ESXi par variables d'environnement et
   saisie interactive du mot de passe ; les outils ne l'acceptent jamais en
   argument de ligne de commande.
 
@@ -655,7 +656,7 @@ connecté :
 
 ## 11. Socle web L0b — clos (15-16/09/2026)
 
-Suite à la demande de Nicolas de démarrer l'interface web (connexion à un
+Suite à la demande de l'utilisateur de démarrer l'interface web (connexion à un
 ESXi/vCenter, inventaire des VM, sélection multiple pour un plan de
 migration), et à son choix explicite de construire tout de suite le socle
 complet plutôt qu'une tranche minimale : **PostgreSQL + Redis + auth/RBAC +
@@ -697,7 +698,7 @@ posé sur du sable.
     `response_model=InventoryResponse` sur la route, ça aurait fait
     échouer **chaque** appel à `/endpoints/{id}/inventory` en 500
     (`ResponseValidationError`) — la fonctionnalité même demandée par
-    Nicolas. Corrigé : `vms` déplacé sur `InventoryDatacenter`, plus rien
+    l'utilisateur. Corrigé : `vms` déplacé sur `InventoryDatacenter`, plus rien
     d'obligatoire sur `InventoryCluster`. Revalidé par instanciation
     directe du schéma avec la forme réelle produite par le pont.
 
@@ -725,9 +726,9 @@ posé sur du sable.
 
 ### Validé le 16/09/2026 sur matériel réel
 
-Nicolas a construit et lancé la stack Docker complète depuis son Mac (la
+L'utilisateur a construit et lancé la stack Docker complète depuis son Mac (la
 procédure ci-dessous), puis testé dans le navigateur contre l'ESXi de lab
-réel (172.25.100.91) : connexion à l'environnement, chargement de
+réel (192.0.2.30) : connexion à l'environnement, chargement de
 l'inventaire (précisément le point que corrigeait le bug de schéma
 ci-dessus — confirmé sans régression), sélection de la VM `ubuntu`,
 création d'un plan, rafraîchissement de la pré-vérification. **Tout
@@ -836,7 +837,7 @@ Ouvrir `http://localhost:5173`, se connecter avec le compte créé à
 l'étape 5, puis :
 
 1. Page **Environnements** : ajouter l'ESXi de lab — nom libre, adresse
-   `172.25.100.91`, utilisateur/mot de passe du lab, **décocher** « Vérifier
+   `192.0.2.30`, utilisateur/mot de passe du lab, **décocher** « Vérifier
    le certificat TLS » (certificat auto-signé). Cliquer « Tester » : doit
    afficher `OK` avec la version ESXi.
 2. Cliquer « Voir les VM » : l'inventaire doit se charger et lister la VM
@@ -887,14 +888,14 @@ docker compose down          # arrête les conteneurs, garde les données Postgr
 
 ## 12. D2 résolu — API REST FusionCompute (17/09/2026)
 
-Nicolas a donné l'adresse de la console VRM du lab FusionCompute
-(`172.25.99.230:8443`, utilisateur `admin`) pour commencer le travail sur le
+L'utilisateur a donné l'adresse de la console VRM du lab FusionCompute
+(`192.0.2.10:8443`, utilisateur `admin`) pour commencer le travail sur le
 driver cible. Ni le bac à sable cloud, ni le pont Linux (`device_bash`), ni
 le navigateur intégré de l'app n'ont de route vers ce réseau (même
 contrainte que pour l'ESXi de lab, §10) — impossible donc d'explorer l'API
 en direct depuis cette session.
 
-Nicolas a alors fourni trois documents constructeur : *FusionCompute 8.10.0
+L'utilisateur a alors fourni trois documents constructeur : *FusionCompute 8.10.0
 VRM APIs* (docx, ~1,5 Mo — la référence des API REST northbound), *KRM
 Interface Documentation* (docx — couvre un sous-système distinct, la
 gestion de clusters Kubernetes sur FusionCompute, **pas utile à D2**), et
@@ -925,7 +926,7 @@ la limite de disques par VM dans §7.4. Résumé :
 confiance** (relevés dans le document lui-même, pas des suppositions de ma
 part) :
 - Le document affirme que le port des API REST est **7443**, alors que
-  l'adresse donnée par Nicolas pour la console VRM est le port **8443** —
+  l'adresse donnée par l'exploitant pour la console VRM est le port **8443** —
   vraisemblablement le port de la console web, distinct du port API. À
   confirmer avant le premier appel réel.
 - Le document se contredit lui-même sur la limite de slots SCSI : le
@@ -947,7 +948,7 @@ documentation seule.
 
 ## 13. Driver cible FusionCompute (lecture) — écrit le 17/09/2026, NON TESTÉ sur le lab
 
-Nicolas a précisé le flux complet voulu pour l'application (17/09/2026,
+L'utilisateur a précisé le flux complet voulu pour l'application (17/09/2026,
 verbatim conservé pour référence) :
 
 > 1. je me connecte a un ESX ou un vcenter
@@ -960,7 +961,7 @@ verbatim conservé pour référence) :
 > 8. j'ai l'option migrate now qui va arreter la VM sur vmware faire la derniere copie et avoir le choix ou non de redemarrer automatiquement la VM sur fusion compute
 
 Les étapes 1-2 sont closes depuis L0b (§11). Cette section couvre ce qui a
-été écrit pour les étapes **3 à 5** ce 17/09/2026, pendant que Nicolas
+été écrit pour les étapes **3 à 5** ce 17/09/2026, pendant que l'utilisateur
 avait accès au lab FusionCompute mais plus à VMware. Les étapes 6-8 ne sont
 pas commencées : elles dépendent du relais et du driver d'écriture
 (§7.1-§7.3 d'ARCHITECTURE.md), pas encore de code.
@@ -997,7 +998,7 @@ pas commencées : elles dépendent du relais et du driver d'écriture
     dur** dans `_connection_args`, jamais stocké — ça passait inaperçu tant
     que seul vCenter/ESXi existait. FusionCompute casse cette hypothèse
     (port d'API documenté 7443, distinct du port console 8443 donné par
-    Nicolas — voir plus bas). `EndpointCreate.port` existait déjà dans le
+    l'utilisateur — voir plus bas). `EndpointCreate.port` existait déjà dans le
     schéma mais était silencieusement ignoré par le routeur : c'était déjà
     un bug avant ce soir, corrigé au passage.
   - `PlanVm.tgt_datastore_urn/name`, `tgt_network_urn/name` — le mapping
@@ -1006,7 +1007,7 @@ pas commencées : elles dépendent du relais et du driver d'écriture
     disparaît ensuite côté FusionCompute.
   - Migration Alembic `0002_fusioncompute_targets.py` — additive
     (`op.add_column`), pas un nouveau `create_all` : la base a déjà des
-    données réelles depuis le test du 16/09/2026. **Nicolas doit lancer
+    données réelles depuis le test du 16/09/2026. **l'utilisateur doit lancer
     `alembic upgrade head` avant de redémarrer l'API** (voir procédure
     ci-dessous).
 - **`api/routers/endpoints.py`** — `_connection_args` utilise désormais
@@ -1047,7 +1048,7 @@ Elles arriveront avec L2.
 
 ### CE QUI RESTE À FAIRE PAR NICOLAS — rien de ce qui précède n'a tourné contre le VRM réel
 
-Aucun outil de cette session n'atteint `172.25.99.230` (§10 : ni le bac à
+Aucun outil de cette session n'atteint `192.0.2.10` (§10 : ni le bac à
 sable cloud, ni `device_bash`, ni le navigateur intégré n'ont de route vers
 ce réseau). Tout le code ci-dessus est écrit à partir de la documentation
 constructeur, jamais exécuté contre un VRM réel. **Avant de faire confiance
@@ -1068,7 +1069,7 @@ docker compose logs -f api   # vérifier que la migration passe et qu'uvicorn d�
 Puis dans l'UI web (`http://localhost:5173` ou le port configuré) :
 
 1. Ajouter un endpoint de type « FusionCompute — VRM », adresse
-   `172.25.99.230`, utilisateur `admin`. **Essayer d'abord le port 7443**
+   `192.0.2.10`, utilisateur `admin`. **Essayer d'abord le port 7443**
    (celui documenté pour l'API) ; si la connexion échoue, essayer 8443
    (celui de la console, au cas où le VRM ne sépare pas les deux ports en
    pratique, contrairement à ce que dit la documentation).
@@ -1082,8 +1083,8 @@ Puis dans l'UI web (`http://localhost:5173` ou le port configuré) :
    vérifier que les datastores et les réseaux affichés correspondent
    vraiment à ce qui existe sur le lab.
 
-**Mise à jour du 17/09/2026 (soir) — port confirmé.** Nicolas a testé en direct au VRM depuis son terminal (curl, identifiants volontairement faux pour observer juste le code d'erreur) :
-- `POST https://172.25.99.230:7443/service/session` → `HTTP 400 {"errorCode":"10100103", ...}` — exactement le code documenté pour un login raté (§7.5 ①). **7443 est confirmé comme le port réel de l'API.**
+**Mise à jour du 17/09/2026 (soir) — port confirmé.** L'utilisateur a testé en direct au VRM depuis son terminal (curl, identifiants volontairement faux pour observer juste le code d'erreur) :
+- `POST https://192.0.2.10:7443/service/session` → `HTTP 400 {"errorCode":"10100103", ...}` — exactement le code documenté pour un login raté (§7.5 ①). **7443 est confirmé comme le port réel de l'API.**
 - Le même appel sur `8443` → `HTTP 401 {"errorCode":"10000002", ...}` — code absent de la documentation, cohérent avec 8443 = la console, pas l'API.
 - Les deux ports sont ouverts au réseau (`nc`), donc ce n'était pas un problème de pare-feu : c'est bien 7443 qu'il faut utiliser. `DEFAULT_API_PORT` dans `datamover/fusioncompute.py` et le port suggéré par le formulaire web étaient déjà réglés sur 7443 — pas de changement de code nécessaire, seule la documentation était incertaine.
 
@@ -1107,7 +1108,7 @@ Une fois ces trois points vérifiés en pratique, les documenter ici (nouvelle
 sous-section) avant d'attaquer l'écriture (②③④⑤, §7.5) — même discipline que
 pour D2 : citer, jamais deviner.
 
-**Ajout du 17/09/2026 (soir) — suppression d'un endpoint.** Nicolas a signalé
+**Ajout du 17/09/2026 (soir) — suppression d'un endpoint.** L'utilisateur a signalé
 qu'il n'existait aucun moyen de retirer un environnement mal configuré
 depuis l'UI (utile typiquement pour corriger un port de test avant le bon
 7443). Ajouté : `DELETE /api/v1/endpoints/{id}` (refuse avec 409 si un plan
@@ -1118,7 +1119,7 @@ confirmation) dans `Endpoints.tsx`. `npm run build` et `pytest` revalidés
 (67 tests, aucune régression).
 
 **Correctif du 17/09/2026 (soir) — 500 sur toute sonde (`probe`), pas propre à FusionCompute.**
-Nicolas a testé la connexion à l'endpoint FusionCompute et obtenu une 500.
+l'utilisateur a testé la connexion à l'endpoint FusionCompute et obtenu une 500.
 Trace complète demandée (`docker compose logs api`) : ce n'était pas le
 pont FusionCompute (qui attrape déjà toute exception et renvoie `ok:
 false`), mais `probe_endpoint` (`api/routers/endpoints.py`) lui-même —
@@ -1133,23 +1134,23 @@ naïf pour matcher la colonne). Revalidé : 67 tests, build web, imports
 API (21 routes) tous propres.
 
 **Ajout du 17/09/2026 (matin) — compte API dédié créé sur le VRM.**
-Nicolas a créé un compte dédié sur le VRM FusionCompute pour cette intégration, plutôt que de réutiliser `admin` :
+l'utilisateur a créé un compte dédié sur le VRM FusionCompute pour cette intégration, plutôt que de réutiliser `admin` :
 
 - Nom d'utilisateur : `api`
 - Type d'utilisateur : *Interface interconnection user* — correspond exactement à `X-Auth-UserType: 2` (§7.5 ①), qui est déjà la valeur par défaut du driver (`user_type: int = 2` dans `FusionComputeClient.__init__`, `datamover/fusioncompute.py`). Aucun changement de code nécessaire de ce côté.
 - Statut : Normal · authentification à deux facteurs : désactivée · connexions concurrentes max : illimitées · plage horaire autorisée : aucune restriction · adresses IP autorisées : aucune restriction · créé le 2026-09-17 08:24:31.
-- Rôle : `administrator,AlarmPerformance,au…` — **tronqué dans la capture d'écran fournie, le rôle complet n'est pas confirmé.** À vérifier auprès de Nicolas si un rôle plus restreint que « administrator » suffirait pour ce compte technique : il n'a en principe besoin que des droits de lecture sur sites/hôtes/datastores/dvswitchs/portgroups, et plus tard (L2) de créer/attacher/détacher des volumes et créer des VM — pas nécessairement la totalité des droits admin.
+- Rôle : `administrator,AlarmPerformance,au…` — **tronqué dans la capture d'écran fournie, le rôle complet n'est pas confirmé.** À vérifier auprès de l'utilisateur si un rôle plus restreint que « administrator » suffirait pour ce compte technique : il n'a en principe besoin que des droits de lecture sur sites/hôtes/datastores/dvswitchs/portgroups, et plus tard (L2) de créer/attacher/détacher des volumes et créer des VM — pas nécessairement la totalité des droits admin.
 
 **Conséquence pour le diagnostic de connexion en cours.** Les tentatives précédentes documentées ci-dessus utilisaient `admin` ; elles restent valables comme preuve que le port 7443 est le bon (le code d'erreur documenté `10100103` a bien été renvoyé), mais n'informent plus sur la validité d'un mot de passe pour le compte `api`, qui est un compte distinct avec son propre mot de passe. **Prochaine étape : retester la connexion (bouton « Tester » dans l'UI, ou curl direct) avec `api` et son mot de passe**, avec la même prudence que précédemment (`read -rs` pour ne jamais taper le mot de passe en clair dans l'historique, et surveiller `failCount` pour éviter un nouveau verrouillage de 5 minutes).
 
 **Ajout du 17/09/2026 (matin) — taille des VM dans l'inventaire.**
-Nicolas a demandé d'afficher la taille de chaque VM dans la liste d'inventaire (`Inventory.tsx`), utile pour juger si un datastore cible a assez de place. Nouvelle colonne « Taille » = somme des capacités des disques virtuels de la VM, en Go (même repli que `DiskSpec.capacity_bytes` dans `datamover/vsphere.py` : `capacityInBytes` si présent, sinon `capacityInKB * 1024`), converti en Go et arrondi à une décimale dans `api/vsphere_bridge.py` (`disk_capacity_gb`), homogène avec les tailles de datastore FusionCompute déjà affichées ailleurs. Champ ajouté à `InventoryVm` (`api/schemas.py`, `web/src/api.ts`) — pas de migration de base nécessaire, la valeur est recalculée à chaque inventaire, jamais stockée. `pytest tests` (67 passés) et `npm run build` revalidés.
+l'utilisateur a demandé d'afficher la taille de chaque VM dans la liste d'inventaire (`Inventory.tsx`), utile pour juger si un datastore cible a assez de place. Nouvelle colonne « Taille » = somme des capacités des disques virtuels de la VM, en Go (même repli que `DiskSpec.capacity_bytes` dans `datamover/vsphere.py` : `capacityInBytes` si présent, sinon `capacityInKB * 1024`), converti en Go et arrondi à une décimale dans `api/vsphere_bridge.py` (`disk_capacity_gb`), homogène avec les tailles de datastore FusionCompute déjà affichées ailleurs. Champ ajouté à `InventoryVm` (`api/schemas.py`, `web/src/api.ts`) — pas de migration de base nécessaire, la valeur est recalculée à chaque inventaire, jamais stockée. `pytest tests` (67 passés) et `npm run build` revalidés.
 
 **Ajout du 17/09/2026 (matin) — suppression d'un plan de migration.**
-Nicolas a demandé la même chose que pour les endpoints (voir plus haut) mais côté plans : `DELETE /api/v1/plans/{plan_id}` (`api/routers/plans.py`), bouton « Supprimer » (avec confirmation) dans `Plans.tsx`. Les VM du plan disparaissent avec (cascade ORM `Plan.vms` + FK `plan_vms.plan_id` en `ON DELETE CASCADE`, déjà en place dans `api/models.py`, rien à changer là). Garde-fou symétrique à celui des endpoints : refuse en 409 si un job d'exécution référence encore ce plan (`jobs.plan_id` n'a pas de cascade, volontairement — §8.1) ; comme aucun job n'est encore créé par l'API (L2 pas écrit), ce cas ne se présente pas encore en pratique, mais le garde-fou est prêt pour quand L2 existera. `pytest tests` (67 passés, 22 routes) et `npm run build` revalidés.
+l'utilisateur a demandé la même chose que pour les endpoints (voir plus haut) mais côté plans : `DELETE /api/v1/plans/{plan_id}` (`api/routers/plans.py`), bouton « Supprimer » (avec confirmation) dans `Plans.tsx`. Les VM du plan disparaissent avec (cascade ORM `Plan.vms` + FK `plan_vms.plan_id` en `ON DELETE CASCADE`, déjà en place dans `api/models.py`, rien à changer là). Garde-fou symétrique à celui des endpoints : refuse en 409 si un job d'exécution référence encore ce plan (`jobs.plan_id` n'a pas de cascade, volontairement — §8.1) ; comme aucun job n'est encore créé par l'API (L2 pas écrit), ce cas ne se présente pas encore en pratique, mais le garde-fou est prêt pour quand L2 existera. `pytest tests` (67 passés, 22 routes) et `npm run build` revalidés.
 
 **Ajout du 17/09/2026 (matin) — inventaire gardé en mémoire, tri et recherche.**
-Deux demandes de Nicolas :
+Deux demandes de l'utilisateur :
 
 1. *Ne plus rescanner tout l'inventaire à chaque connexion.* Le cache Redis existait déjà (`api/cache.py`) mais avec un TTL de 30 s (`INVENTORY_TTL_SECONDS`) — en pratique, revenir sur la page quelques secondes après relançait un scan complet vCenter + pré-vérification par VM. Le TTL est supprimé : `get_cached_inventory` (et son équivalent FusionCompute `get_cached_fc_datastores`/`get_cached_fc_networks`) sert désormais la dernière valeur connue indéfiniment, jusqu'à un rafraîchissement explicite (le bouton « rafraîchir » existait déjà dans l'UI, `refresh=true` côté route — rien à ajouter là). Un volume Docker nommé (`v2fc-redis-data:/data`, `docker-compose.yml`) a été ajouté pour que cette dernière valeur survive aussi à un `docker compose down` + `up`, pas seulement à un redémarrage de conteneur — Redis reste un raccourci de confort, pas la source de vérité : sa perte force simplement un nouveau scan complet, rien de cassé si ça arrive.
 2. *Trier/rechercher dans l'inventaire.* `Inventory.tsx` : colonnes d'en-tête cliquables (tri croissant/décroissant, indicateur ▲/▼) sur toutes les colonnes (VM, datacenter, état, disques, taille, CBT, firmware, migrable), et un champ de recherche libre (nom, datacenter, OS, état, firmware — insensible à la casse). Purement côté client : la liste est déjà entièrement récupérée par la page, pas besoin de toucher l'API pour ça. Le bouton « Tout sélectionner (migrables) » continue de porter sur la liste complète, pas seulement les VM filtrées affichées.
@@ -1157,17 +1158,17 @@ Deux demandes de Nicolas :
 `pytest tests` (67 passés) et `npm run build` revalidés.
 
 **Ajout du 17/09/2026 (matin) — statut de progression pendant l'inventaire vCenter.**
-Nicolas a demandé un retour d'avancement pendant le scan (potentiellement long : connexion + pré-vérification de chaque VM). Le scan lui-même tourne toujours en un seul appel bloquant (`vsphere_bridge.inventory`, dans un thread via `run_in_threadpool` — rien à changer côté vCenter/pyVmomi), mais il publie maintenant sa progression dans Redis au fil de l'eau (`api/cache.py`, `set_inventory_progress_sync`, via un client Redis **synchrone** distinct du client asyncio existant — nécessaire car ce code tourne dans un thread bloquant sans boucle asyncio à qui parler). Nouvelle route de poll, légère et sans effet de bord : `GET /endpoints/{id}/inventory/progress` → `{phase, done, total}` (`phase` : idle/connecting/preflight/done). `Inventory.tsx` interroge cette route toutes les secondes tant que le chargement principal est en cours, et affiche « Pré-vérification des VM : X / Y » avec une petite barre de progression ; la réponse de `GET /inventory` reste la seule source de vérité sur la fin du scan, ce poll n'est qu'indicatif et s'arrête tout seul. TTL court (120 s) sur cette clé de progression (contrairement au cache d'inventaire lui-même, sans TTL depuis l'ajout précédent) : c'est un état transitoire « un scan tourne », pas une valeur à revoir indéfiniment — s'il expire (scan anormalement long, ou crash), l'UI retombe simplement sur l'état par défaut plutôt que d'afficher une progression figée pour toujours. `pytest tests` (67 passés, 23 routes) et `npm run build` revalidés.
+l'utilisateur a demandé un retour d'avancement pendant le scan (potentiellement long : connexion + pré-vérification de chaque VM). Le scan lui-même tourne toujours en un seul appel bloquant (`vsphere_bridge.inventory`, dans un thread via `run_in_threadpool` — rien à changer côté vCenter/pyVmomi), mais il publie maintenant sa progression dans Redis au fil de l'eau (`api/cache.py`, `set_inventory_progress_sync`, via un client Redis **synchrone** distinct du client asyncio existant — nécessaire car ce code tourne dans un thread bloquant sans boucle asyncio à qui parler). Nouvelle route de poll, légère et sans effet de bord : `GET /endpoints/{id}/inventory/progress` → `{phase, done, total}` (`phase` : idle/connecting/preflight/done). `Inventory.tsx` interroge cette route toutes les secondes tant que le chargement principal est en cours, et affiche « Pré-vérification des VM : X / Y » avec une petite barre de progression ; la réponse de `GET /inventory` reste la seule source de vérité sur la fin du scan, ce poll n'est qu'indicatif et s'arrête tout seul. TTL court (120 s) sur cette clé de progression (contrairement au cache d'inventaire lui-même, sans TTL depuis l'ajout précédent) : c'est un état transitoire « un scan tourne », pas une valeur à revoir indéfiniment — s'il expire (scan anormalement long, ou crash), l'UI retombe simplement sur l'état par défaut plutôt que d'afficher une progression figée pour toujours. `pytest tests` (67 passés, 23 routes) et `npm run build` revalidés.
 
-**Correctif du 17/09/2026 (matin) — bouton « Enregistrer » grisé sur une VM déjà mappée (`PlanTarget.tsx`).** Nicolas a signalé le bouton toujours désactivé sur une VM dont le datastore/réseau cible avaient déjà été enregistrés lors d'une visite précédente. Cause : la condition ne regardait que l'état `pending` (les sélections faites *pendant cette visite-ci*), qui reste vide tant qu'un `<select>` HTML ne change pas réellement de valeur — or un menu déjà positionné sur la valeur déjà enregistrée ne déclenche jamais `onChange`, même si l'utilisateur re-clique dessus. Corrigé : la condition se base maintenant sur `currentDs`/`currentNet` (la valeur réellement affichée dans le menu, fraîche ou déjà enregistrée), pas seulement sur `pending`. Sans risque côté backend : `PUT /plans/{id}/vms/{vm_id}/mapping` n'écrase un champ que si la valeur envoyée n'est pas `null` (`api/schemas.py` `PlanVmMappingUpdate`, `api/routers/plans.py`) — cliquer « Enregistrer » sans avoir touché l'autre menu ne peut donc pas effacer sa valeur déjà enregistrée. `npm run build` revalidé.
+**Correctif du 17/09/2026 (matin) — bouton « Enregistrer » grisé sur une VM déjà mappée (`PlanTarget.tsx`).** L'utilisateur a signalé le bouton toujours désactivé sur une VM dont le datastore/réseau cible avaient déjà été enregistrés lors d'une visite précédente. Cause : la condition ne regardait que l'état `pending` (les sélections faites *pendant cette visite-ci*), qui reste vide tant qu'un `<select>` HTML ne change pas réellement de valeur — or un menu déjà positionné sur la valeur déjà enregistrée ne déclenche jamais `onChange`, même si l'utilisateur re-clique dessus. Corrigé : la condition se base maintenant sur `currentDs`/`currentNet` (la valeur réellement affichée dans le menu, fraîche ou déjà enregistrée), pas seulement sur `pending`. Sans risque côté backend : `PUT /plans/{id}/vms/{vm_id}/mapping` n'écrase un champ que si la valeur envoyée n'est pas `null` (`api/schemas.py` `PlanVmMappingUpdate`, `api/routers/plans.py`) — cliquer « Enregistrer » sans avoir touché l'autre menu ne peut donc pas effacer sa valeur déjà enregistrée. `npm run build` revalidé.
 
 **Ajout du 17/09/2026 (matin) — dossier `install/` pour la livraison finale.**
-Nicolas a demandé un dossier pour installer la solution complète (socle web
+l'utilisateur a demandé un dossier pour installer la solution complète (socle web
 + Data Mover/VDDK), à maintenir à jour jusqu'à la fin du projet en vue de la
 livraison. Créé à la racine du projet (`install/`, à côté de `v2fc/`) :
 consolide en scripts et en un `README.md` unique des procédures déjà
 validées sur le terrain, sans en changer le contenu ni en inventer de
-nouvelles — `HANDOFF.md` §11 (socle web, validé 16/09/2026) et
+nouvelles — `docs/dev/JOURNAL.md` §11 (socle web, validé 16/09/2026) et
 `v2fc/README.md` (Data Mover, validé 15 et 17/09/2026, voir §5
 quinquies/sexies) restent les sources de référence en cas de divergence.
 
@@ -1175,11 +1176,11 @@ quinquies/sexies) restent les sources de référence en cas de divergence.
   compose` disponible, VDDK présent/décompressé, `.env` déjà configuré ou
   non) ; ne modifie rien.
 - `install/setup-env.sh` — crée `v2fc/.env` depuis `.env.example` et génère
-  `JWT_SECRET`/`V2FC_KEK` (mêmes commandes que HANDOFF.md §11 point 1) ;
+  `JWT_SECRET`/`V2FC_KEK` (mêmes commandes que docs/dev/JOURNAL.md §11 point 1) ;
   n'écrase jamais un `.env` existant.
 - `install/start-webapp.sh` / `install/stop-webapp.sh` — `docker compose
   build` puis démarrage `postgres`/`redis` (attente `healthy`) puis
-  `api`/`web` (HANDOFF.md §11 points 2 à 4) ; arrêt avec ou sans
+  `api`/`web` (docs/dev/JOURNAL.md §11 points 2 à 4) ; arrêt avec ou sans
   suppression des volumes (`--wipe`, confirmation demandée). **Ne créent
   volontairement pas le premier compte** : `api/seed_admin.py` n'accepte
   jamais de mot de passe en argument (invariant du §10) — la commande à
@@ -1198,7 +1199,7 @@ restent documentées une seule fois, dans `v2fc/README.md`, pour éviter
 qu'une copie ici ne diverge de l'original avec le temps.
 
 **À faire avant la livraison finale** (pas fait aujourd'hui, pas encore
-demandé par Nicolas) : ce dossier ne couvre encore que L0b + L1 tels
+demandé par l'utilisateur) : ce dossier ne couvre encore que L0b + L1 tels
 qu'ils existent maintenant. Il faudra le compléter au fil du projet — au
 minimum quand le driver cible FusionCompute (écriture) et le lot L2
 (machine à états, jobs) existeront, et si le service `web` passe un jour
@@ -1207,8 +1208,8 @@ déjà présente dans `web/Dockerfile`).
 
 ## 16. Socle L2 — jobs de migration, onglets Migration/Logs (17/09/2026, après-midi)
 
-Demandé explicitement par Nicolas une fois L1 validé deux fois sur plateforme
-réelle (§5 sexies), et après un point de phasage explicite : Nicolas a choisi
+Demandé explicitement par l'utilisateur une fois L1 validé deux fois sur plateforme
+réelle (§5 sexies), et après un point de phasage explicite : l'utilisateur a choisi
 « tout le socle L2 en une fois » plutôt qu'un découpage progressif (driver
 d'écriture seul, puis UI, puis exécution) — voir la discussion tenue dans ce
 tour de session. Construit dans la foulée, avec la même discipline que
@@ -1255,7 +1256,7 @@ tester ce qui peut l'être sans lab réel).
   /jobs/{id}/logs` (`_ApiLogHandler`, best-effort). Rapporte le résultat
   (statut, octets, changeId par disque lu dans le fichier d'état déjà
   écrit) à l'API en fin de round. **Ne change rien à la discipline
-  existante** : le mot de passe vCenter reste fourni par Nicolas via
+  existante** : le mot de passe vCenter reste fourni par l'utilisateur via
   `V2FC_VC_PASSWORD`, jamais par l'API (§13) ; le jeton d'API
   (`V2FC_API_TOKEN`, obtenu par `POST /auth/login` comme l'UI web) suit la
   même règle de ne jamais passer en argument de ligne de commande.
@@ -1270,21 +1271,21 @@ tester ce qui peut l'être sans lab réel).
   « Migrer maintenant » (avec case à cocher redémarrage automatique) et
   rollback. Logs : page par job (poll 2 s) + un onglet Logs global listant
   les jobs actifs. **Cette UI ne lance jamais elle-même le round** : le
-  VDDK tourne dans un conteneur Docker séparé sur le poste de Nicolas
+  VDDK tourne dans un conteneur Docker séparé sur le poste de l'utilisateur
   (api/Dockerfile ne le charge pas), donc la page ne peut qu'afficher la
   commande à lancer, pas cliquer un bouton qui l'exécuterait à distance.
   `npm run build` : `tsc -b` propre (aucune erreur de type) ; le bundle
   `vite build` se construit correctement (vérifié en sortie alternative,
   `/tmp` de ce bac à sable) — le seul échec rencontré vient d'un `dist/`
   résiduel appartenant à un autre utilisateur (probablement un ancien
-  `docker compose build` exécuté par Nicolas), un souci de permissions
+  `docker compose build` exécuté par l'utilisateur), un souci de permissions
   local à ce bac à sable, sans rapport avec le code ; supprimer
   `v2fc/web/dist/` avant le prochain `docker compose build` si le même
-  symptôme apparaît chez Nicolas.
+  symptôme apparaît sur le lab.
 
 ### Ce qui reste délibérément non exercé — pas un manque caché, une limite honnête
 
-- **Aucune VM relais réelle n'existe** chez Nicolas à ce jour : le
+- **Aucune VM relais réelle n'existe** sur le lab à ce jour : le
   provisioning FusionCompute réel (`create_and_attach_volume`) et la
   finalisation (`create_vm`, `attach_volume`, `power_on`) sont du vrai
   code, cité, unitairement testé — mais **jamais exécutés contre un VRM
@@ -1292,7 +1293,7 @@ tester ce qui peut l'être sans lab réel).
   relais assigné à un job, `POST /jobs/{id}/provision` saute sciemment la
   partie FusionCompute (log `warning` explicite) et le job passe directement
   en SEEDING : le round écrit alors dans le `--target-dir` local que
-  Nicolas fournit à `job-run`, exactement comme la validation du jour
+  l'utilisateur fournit à `job-run`, exactement comme la validation du jour
   (§5 sexies) — utilisable dès maintenant pour roder le flux complet
   (créer un job, seed, delta, bascule, logs) sans attendre le relais.
 - **`agent_url` du modèle `Relay` reste un champ réservé** : aucun agent
@@ -1305,16 +1306,16 @@ tester ce qui peut l'être sans lab réel).
 - **`_finalize` (bascule finale)** appelle `get_vm` sur la VM relais pour
   situer la VM cible au même endroit (cluster/hôte) — c'est la seule
   méthode documentée pour choisir un emplacement de VM sans qu'aucune
-  autre option n'ait été demandée ; à revoir si Nicolas veut un
+  autre option n'ait été demandée ; à revoir si l'utilisateur veut un
   emplacement différent pour la VM cible.
 - **Aucun test d'intégration base de données** pour `api/routers/jobs.py`
   (pas d'infrastructure de test avec une vraie base dans ce dépôt — les
   tests existants n'en ont jamais eu besoin jusqu'ici, seulement des
   fausses sessions HTTP). Validé uniquement par l'import de l'application
   (37 routes, aucune erreur) et par relecture attentive — **à tester pour
-  de vrai par Nicolas** dès qu'un relais (même provisoire) est disponible.
+  de vrai par l'utilisateur** dès qu'un relais (même provisoire) est disponible.
 
-### Prochaine étape suggérée à Nicolas
+### Prochaine étape suggérée à l'utilisateur
 
 Roder le flux dès maintenant sans relais (créer un plan avec cible +
 mapping, créer un job, le provisionner, lancer `job-run --round seed`
@@ -1322,12 +1323,12 @@ puis `--round delta` depuis le terminal comme pour la validation L1,
 regarder l'onglet Logs) — cela valide déjà la mécanique état/API/UI de
 bout en bout. Le relais réel (VM dans FusionCompute + décision sur le
 protocole agent, §13) reste la pièce qui manque pour une bascule
-FusionCompute complète, à traiter quand Nicolas sera prêt à la construire.
+FusionCompute complète, à traiter quand l'utilisateur sera prêt à la construire.
 
 
-## 17. Bug report Nicolas (17/09/2026, soir) — mapping "Enregistrer" muet + 404 sur Migration/Logs
+## 17. Rapport de bug (17/09/2026, soir) — mapping "Enregistrer" muet + 404 sur Migration/Logs
 
-Nicolas a testé les nouveaux onglets et signalé deux symptômes en même
+L'utilisateur a testé les nouveaux onglets et signalé deux symptômes en même
 temps, avec captures d'écran : (a) sur la page cible FusionCompute d'un
 plan, cliquer "Enregistrer" pour le mapping datastore/réseau d'une VM ne
 semble rien faire ; (b) les onglets Migration et Logs affichent tous les
@@ -1349,7 +1350,7 @@ tout simplement pas les routes `/api/v1/jobs` et `/api/v1/relays` → 404
 "Not Found" littéral (le format `${status} : ${detail}` de `web/src/api.ts`
 correspond exactement à la réponse 404 par défaut de FastAPI pour une
 route inexistante, pas à une erreur applicative). **Correctif côté
-Nicolas, pas de code à changer** :
+l'utilisateur, pas de code à changer** :
 
 ```
 docker compose build api
@@ -1364,7 +1365,7 @@ ce jour.)
 Bug réel trouvé dans `web/src/pages/PlanTarget.tsx`, indépendant du point
 (b). `saveMapping(vmId)` lisait uniquement `pendingMapping[vmId]` (l'état
 qui change quand on touche un `<select>`) pour construire la requête, avec
-`ds?.urn ?? null`. Or les captures montrées par Nicolas affichaient déjà
+`ds?.urn ?? null`. Or les captures montrées par l'utilisateur affichaient déjà
 les libellés "actuel : LUN-1000-1" / "actuel : managePortgroup" — ce qui,
 d'après le JSX (`{vm.tgt_datastore_name && !pending.datastoreUrn && ...}`),
 signifie que le mapping était **déjà enregistré** (d'une session
@@ -1376,7 +1377,7 @@ code envoyait `datastore_urn: null` / `network_urn: null`. Côté API,
 `None` (`if body.datastore_urn is not None: ...`) — comportement correct
 en soi (pensé pour un PATCH partiel), mais qui fait que ce clic précis ne
 changeait rigoureusement rien, sans la moindre erreur : exactement le
-symptôme "rien ne se passe" décrit par Nicolas.
+symptôme "rien ne se passe" décrit par l'utilisateur.
 
 Corrigé dans `saveMapping` : la valeur envoyée retombe maintenant sur
 `vm.tgt_datastore_urn`/`vm.tgt_network_urn` (celle réellement affichée
@@ -1411,7 +1412,7 @@ Cause : `api/Dockerfile` ne fait `COPY` que de `datamover/` et `api/` vers
 (hors Docker), l'import réussissait par accident car le répertoire de
 travail (`v2fc/`) contient déjà `relay/` et Python l'ajoute implicitement à
 `sys.path` — un faux négatif qui a caché le problème jusqu'à ce que
-Nicolas reconstruise réellement l'image.
+l'utilisateur reconstruise réellement l'image.
 
 **Corrigé** : `api/Dockerfile` copie maintenant aussi `relay/` :
 ```
@@ -1421,19 +1422,19 @@ COPY api/       /work/api/
 ```
 Vérifié en reproduisant exactement l'arborescence `/work` de l'image dans
 un répertoire neutre (`datamover/` + `api/` seuls → échec identique à celui
-de Nicolas ; en ajoutant `relay/` → import réussi, 37 routes). `relay/
+de l'utilisateur ; en ajoutant `relay/` → import réussi, 37 routes). `relay/
 writer.py` ne dépend que de la bibliothèque standard (pas de VDDK, pas de
 SDK vSphere) — l'inclure dans l'image `api` ne contredit pas l'invariant
 « l'API ne charge pas le VDDK » (`api/Dockerfile`, commentaire d'en-tête).
 
-**Prochaine étape pour Nicolas** : `docker compose build api && docker
+**Prochaine étape pour l'utilisateur** : `docker compose build api && docker
 compose up -d api`, puis vérifier `docker compose logs api --tail 30` (doit
 se terminer par les lignes uvicorn "Application startup complete", plus de
 traceback), puis recharger Migration/Logs.
 
 ### Mise à jour du 17/09/2026 (nuit, suite) — 500 sur Provisionner : même piège que `endpoints.last_probe_at`, réapparu dans `jobs.py`
 
-Une fois l'image `api` reconstruite avec `relay/` (ci-dessus), Nicolas a pu
+Une fois l'image `api` reconstruite avec `relay/` (ci-dessus), l'utilisateur a pu
 créer un job (`POST /jobs` → journalisé « job créé pour test_ubuntu depuis
 le plan « test_ubuntu » », visible dans l'onglet Logs) mais cliquer
 « Provisionner » renvoyait `500 : Internal Server Error`. Trace obtenue via
@@ -1469,10 +1470,10 @@ round-trip `since` de `GET /jobs/{id}/logs` (Logs.tsx) reste sûr car il
 réutilise tel quel le datetime naïf déjà renvoyé par l'API, sans lui
 ajouter de fuseau. `pytest tests` toujours 74 passés/3 sautés (ces routes
 n'ont toujours pas de test d'intégration base de données réelle — seul un
-vrai `docker compose` avec Postgres, comme celui de Nicolas, peut
+vrai `docker compose` avec Postgres, comme celui de l'utilisateur, peut
 détecter ce genre de défaut ; à garder en tête pour la suite de L2).
 
-**Prochaine étape pour Nicolas** : `docker compose build api && docker
+**Prochaine étape pour l'utilisateur** : `docker compose build api && docker
 compose up -d api` (fichier Python, donc image à reconstruire — pas
 comme le correctif `PlanTarget.tsx` plus haut, qui ne demandait qu'un
 rechargement de page), puis reprendre le provisioning du job `test_ubuntu`.
@@ -1520,22 +1521,22 @@ Vérifié : `alembic history` résout bien la chaîne 0001→0002→0003→0004
 import de l'application simulé dans l'arborescence exacte de l'image
 Docker (`datamover/` + `relay/` + `api/`) confirmant les 8 colonnes en
 `BIGINT` ; `pytest tests` toujours 74 passés/3 sautés. C'est la troisième
-chose que le premier vrai test contre un Postgres réel (celui de Nicolas,
+chose que le premier vrai test contre un Postgres réel (celui de l'utilisateur,
 pas les fausses sessions HTTP des tests unitaires) a mise au jour ce
 soir — cohérent avec la mise en garde déjà écrite au §16 sur ce point.
 
-**Prochaine étape pour Nicolas** : `docker compose build api && docker
+**Prochaine étape pour l'utilisateur** : `docker compose build api && docker
 compose up -d api` (nouveau code Python + nouvelle migration), puis
 reprendre le provisioning du job `test_ubuntu`.
 
 
 ## 18. Décision d'architecture : relais = VM applicative colocalisée, pas d'agent réseau (17/09/2026, nuit)
 
-Nicolas a posé la question directement : pourquoi prévoir un relais séparé
+L'utilisateur a posé la question directement : pourquoi prévoir un relais séparé
 si la VM Ubuntu qui héberge l'application elle-même vit déjà dans le
 cluster FusionCompute (DCS) où la cible doit être écrite ? Après analyse,
 la réponse est oui, ça marche, et c'est même préférable au design décrit
-jusqu'ici — **Nicolas a confirmé, ARCHITECTURE.md mis à jour en
+jusqu'ici — **l'utilisateur a confirmé, ARCHITECTURE.md mis à jour en
 conséquence** (§3, §7.1, §12 nouvelle décision D7, §13, §14 L2).
 
 Le raisonnement : un volume FusionCompute ne peut être attaché qu'à une VM
@@ -1560,7 +1561,7 @@ VM Ubuntu x86-64 dans le cluster DCS avec Docker + le VDDK (comme le
 Data Mover tourne déjà, `install/build-datamover.sh`), s'assurer qu'elle a
 une route réseau vers le vCenter/ESXi source, l'enregistrer comme relais
 (une fois son `fc_vm_uri` VRM connu), puis lancer `job-run` depuis
-celle-ci au lieu du Mac de Nicolas. Aucun nouveau code à écrire pour cette
+celle-ci au lieu du poste de développement. Aucun nouveau code à écrire pour cette
 partie — seulement du déploiement.
 
 **Ce qui n'a pas changé** : le driver d'écriture FusionCompute
@@ -1569,11 +1570,11 @@ reste non testé contre un VRM réel (même limite que §16) ; D5 (sérialisatio
 SCSI des volumes dans le relais) reste ouvert et se testera sur cette même
 VM une fois déployée.
 
-**Procédure d'installation écrite** dans `install/README.md`, nouvelle section « Déploiement complet sur une VM à l'intérieur du cluster FusionCompute (relais colocalisé) » : réseau (accès aux deux environnements, source et cible), Docker, transfert de fichiers (pas de dépôt git, copie directe), secrets, `CORS_ORIGINS` à corriger pour un accès distant, enregistrement du relais via appel API direct (pas encore de formulaire dans l'interface). Nicolas gère lui-même l'installation de l'OS ; cette VM hébergera l'application complète (API/web/Postgres/Redis) en plus du rôle Data Mover/relais, à sa demande explicite du 17/09/2026.
+**Procédure d'installation écrite** dans `install/README.md`, nouvelle section « Déploiement complet sur une VM à l'intérieur du cluster FusionCompute (relais colocalisé) » : réseau (accès aux deux environnements, source et cible), Docker, transfert de fichiers (pas de dépôt git, copie directe), secrets, `CORS_ORIGINS` à corriger pour un accès distant, enregistrement du relais via appel API direct (pas encore de formulaire dans l'interface). L'utilisateur gère lui-même l'installation de l'OS ; cette VM hébergera l'application complète (API/web/Postgres/Redis) en plus du rôle Data Mover/relais, à sa demande explicite du 17/09/2026.
 
 ## 19. Choix du relais à la création d'un job (26/10/2026)
 
-À la demande de Nicolas, la page Migration propose maintenant un menu
+À la demande utilisateur, la page Migration propose maintenant un menu
 « Relais » avant « Créer un job » : il liste les relais enregistrés sur
 l'endpoint FusionCompute cible du plan (premier proposé par défaut), plus
 « aucun (écriture locale) ». Avant, l'UI prenait silencieusement
@@ -1584,14 +1585,14 @@ d'un relais se fait toujours par `POST /relays` (pas de formulaire).
 
 ## 20. Provisioning FusionCompute : URN de datastore et échec masqué (26/10/2026)
 
-Premier provisioning réel (job R00vSkypeEd, relais `i-0000000D`) :
+Premier provisioning réel (job VM-WIN-01, relais `i-00000013`) :
 `createattachvol` refusé par le VRM (`10000001`, « format de requête
 invalide »), mais le job passait quand même en SEEDING — un seed aurait
 écrit 100 Go en local sans le dire.
 
 - **Cause** : `GET <host>/datastores` renvoie un identifiant nu (`"urn": "5"`),
   repris tel quel comme `datastoreUrn`. `GET <site>/datastores/5` donne la
-  vraie URN `urn:sites:0A7D0FDA:datastores:5`. `list_datastores()` et
+  vraie URN `urn:sites:5A1E0001:datastores:5`. `list_datastores()` et
   `create_and_attach_volume()` complètent désormais l'URN (`_full_urn`),
   ce qui couvre aussi les plans déjà enregistrés avec `5`.
 - **Échec visible** : une création de volume en erreur fait passer le job
@@ -1601,10 +1602,10 @@ invalide »), mais le job passait quand même en SEEDING — un seed aurait
 
 ## 21. Rounds automatiques : écriture sur le relais + service runner (26/10/2026)
 
-Demande de Nicolas : plus de commande `job-run` à copier, « ça doit être
+Demande utilisateur : plus de commande `job-run` à copier, « ça doit être
 en automatique ». Validé sur le VRM réel avant d'écrire le code :
 `createattachvol` (URN complète, §20) crée et attache un volume VIRTIO à la
-VM relais `i-0000000D` (= `dc1-migration`).
+VM relais `i-00000013` (= `dc1-migration`).
 
 - **D5 tranché** : le volume apparaît sous
   `/dev/disk/by-id/virtio-<20 premiers caractères de son UUID>` (série
@@ -1631,7 +1632,7 @@ VM relais `i-0000000D` (= `dc1-migration`).
 
 ## 22. Premier seed réel bout en bout + barre de progression (26/10/2026)
 
-**Seed réel réussi** : R00vSkypeEd (PLAN1), 100 Gio provisionnés, 44,7 Gio
+**Seed réel réussi** : VM-WIN-01 (PLAN1), 100 Gio provisionnés, 44,7 Gio
 copiés en ~10 min à 69-73 Mio/s (nbdssl depuis `dc1-migration`, écriture
 sur le volume FusionCompute 70 via le relais). Job en SYNCED.
 
@@ -1642,7 +1643,7 @@ runner a relancé le seed 4 fois (chaque passage complet et correct). Corrigé
 refuse le rapport, et le runner attend `V2FC_RUNNER_COOLDOWN_S` (300 s) avant
 de relancer un round du même job.
 
-**Barre de progression** (demande de Nicolas) : `cmd_sync` calcule les plans
+**Barre de progression** (demande utilisateur) : `cmd_sync` calcule les plans
 de tous les disques avant la copie (total du round connu d'emblée) ;
 `job-run` envoie `POST /jobs/{id}/rounds/{rid}/progress` toutes les 5 s
 (`bytes_planned`, `bytes_done`, stockés dans `sync_rounds` tant que le round
@@ -1650,9 +1651,9 @@ tourne). La page Migration affiche barre, %, Gio, débit et temps restant.
 
 ## 23. Relais détecté automatiquement + compte FusionCompute (26/10/2026)
 
-- **Auto-enregistrement du relais** : constaté sur le VRM de Nicolas,
+- **Auto-enregistrement du relais** : constaté sur un VRM réel,
   `/sys/class/dmi/id/product_uuid` de la VM = champ `uuid` de la VM dans
-  FusionCompute (`DC1_MIGRATION`, `2ae09df9-…`). Le runner envoie cet UUID à
+  FusionCompute (`VM-RELAIS`, `2ae09df9-…`). Le runner envoie cet UUID à
   `POST /api/v1/runner/register` au démarrage puis toutes les 10 min ; l'API
   vérifie d'abord les relais connus (`get_vm`), sinon parcourt les VM du site
   (`list_vms`, paginé), et crée ou passe ONLINE le relais correspondant.
@@ -1667,7 +1668,7 @@ tourne). La page Migration affiche barre, %, Gio, débit et temps restant.
 
 ## 24. Première bascule réelle : finalisation corrigée (26/10/2026)
 
-R00vSkypeEd (PLAN1) : bascule lancée par Nicolas, delta final OK (VM déjà
+VM-WIN-01 (PLAN1) : bascule lancée par l'utilisateur, delta final OK (VM déjà
 éteinte, 0 Mio), puis `create_vm` refusé par le VRM : `10300069` « le type
 de système d'exploitation ne peut pas être vide ». `_finalize`, jamais
 exercé, avait aussi d'autres défauts. Corrigé :
@@ -1684,9 +1685,9 @@ exercé, avait aussi d'autres défauts. Corrigé :
   finalisation ») ; étapes déjà faites sautées (volume déjà détaché, VM déjà
   créée — `tgt_vm_uri` enregistré dès la création —, volume déjà attaché).
 
-Résultat : VM `i-0000000E` « R00vSkypeEd » créée éteinte, 6 vCPU, 32 Go,
+Résultat : VM `i-00000014` « VM-WIN-01 » créée éteinte, 6 vCPU, 32 Go,
 BIOS, Windows Server 2016, volume 70 (101 Gio) en IDE, une carte sur le port
-group DMZ. **Démarrage confirmé par Nicolas le 26/10/2026** : Windows Server 2016
+group DMZ. **Démarrage confirmé en conditions réelles le 26/10/2026** : Windows Server 2016
 démarre sur FusionCompute depuis le disque IDE — première migration
 VMware → FusionCompute complète de bout en bout. Restent ouverts :
 une seule carte réseau créée (la source en a deux), de type virtio (pas de
@@ -1695,7 +1696,7 @@ reste dans le dernier secteur du volume (hors des 100 Gio de données).
 
 ## 25. Mapping réseau par carte (26/10/2026)
 
-Demande de Nicolas après la bascule de R00vSkypeEd (deux cartes source, une
+Demande utilisateur après la bascule de VM-WIN-01 (deux cartes source, une
 seule recréée) : un réseau de destination par carte réseau source.
 
 - `SourceVm.nics()` : clé, libellé, type (E1000e, Vmxnet3...), MAC et
@@ -1711,8 +1712,8 @@ seule recréée) : un réseau de destination par carte réseau source.
 - Bascule : une carte FusionCompute par carte mappée, dans l'ordre des clés
   source (`_target_nics`). Les MAC source ne sont pas reprises.
 
-Vérifié sur le vCenter réel : R00vSkypeEd = 2 × E1000e (« VLAN 2552 – BE
-Server », « DMZ DPortGroup »), R00vSkype-OVOC = 1 × Vmxnet3.
+Vérifié sur le vCenter réel : VM-WIN-01 = 2 × E1000e (« VLAN 2552 – BE
+Server », « DMZ DPortGroup »), VM-LNX-01 = 1 × Vmxnet3.
 
 ## 26. Option « conserver la MAC » par carte (26/10/2026)
 
@@ -1745,15 +1746,15 @@ en réel : le refus sur job actif et la suppression des volumes (même appels
 FusionCompute que ceux vérifiés au §21 sur un volume de test).
 
 **Correctif le jour même (migration 0006)** : la suppression de PLAN1 par
-Nicolas renvoyait 500 — `disk_rounds.job_disk_id` n'était pas en
+l'utilisateur renvoyait 500 — `disk_rounds.job_disk_id` n'était pas en
 `ON DELETE CASCADE` (seule clé de la chaîne jobs → … → extents dans ce cas),
 donc tout job ayant rapporté un round était insupprimable. Après correctif,
-PLAN1 supprimé avec son job CUTOVER_DONE : VM R00vSkypeEd (`i-0000000E`) et
+PLAN1 supprimé avec son job CUTOVER_DONE : VM VM-WIN-01 (`i-00000014`) et
 son volume 70 intacts sur FusionCompute, comme prévu.
 
 ## 28. Deltas manuels ou planifiés, plus de delta périodique (26/10/2026)
 
-Demande de Nicolas : pas de delta automatique toutes les N minutes.
+Demande utilisateur : pas de delta automatique toutes les N minutes.
 `V2FC_DELTA_INTERVAL_MIN` supprimé (config, compose, `.env.example`).
 Colonnes `jobs.delta_requested`, `delta_scheduled_at` (UTC),
 `delta_repeat_daily` (migration 0007). Le runner ne prend un job SYNCED que
@@ -1765,7 +1766,7 @@ planification quotidienne passe au lendemain même heure (heure UTC fixe :
 décalage d'une heure aux changements d'heure), une ponctuelle s'efface.
 Seed après provisioning et delta final de la bascule restent automatiques.
 
-**Simplifié le jour même (migration 0008)**, à la demande de Nicolas (« juste
+**Simplifié le jour même (migration 0008)**, à la demande de l'utilisateur (« juste
 à quelle heure chaque jour ») : le planificateur ne prend plus qu'une heure
 `HH:MM`, delta chaque jour à cette heure. `delta_daily_time` + `delta_timezone`
 (fuseau IANA du navigateur) ; `delta_scheduled_at` = prochaine occurrence UTC
@@ -1775,7 +1776,7 @@ de l'API.
 
 ## 29. Dernière synchronisation et historique des rounds (26/10/2026)
 
-Nicolas ne voyait pas quand le dernier delta avait eu lieu. Page Migration,
+L'utilisateur ne voyait pas quand le dernier delta avait eu lieu. Page Migration,
 sous chaque job : « Dernière synchronisation : delta n°2 — terminé le … —
 7 s — 47 Mio écrits — réussi », et un historique dépliable de tous les
 rounds (type, fin, durée, volume écrit, statut). Uniquement de l'affichage :

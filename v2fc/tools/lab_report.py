@@ -340,7 +340,7 @@ def measure_vm(client: VSphereClient, vm_name: str, thumbs: dict,
             s["vddk"]["available_transports"] = lib.transport_modes
             print(f"  transports disponibles : {':'.join(lib.transport_modes)}")
 
-            # HANDOFF §5 ter : le rejet VDDK observé (« Invalid search
+            # journal §5 ter : le rejet VDDK observé (« Invalid search
             # specifier ») porte sur le vmxSpec, pas sur le diskPath. On
             # essaie donc plusieurs formes de vmxSpec, une connexion par
             # forme, jusqu'à ce qu'une permette d'ouvrir au moins un disque.
@@ -408,7 +408,7 @@ def _describe_change_id(change_id: str | None) -> str:
 
 def _vmx_spec_candidates(vm):
     """
-    Formes de vmxSpec à essayer pour VixDiskLib_ConnectEx (HANDOFF §5 ter) :
+    Formes de vmxSpec à essayer pour VixDiskLib_ConnectEx (journal §5 ter) :
     la forme usuelle « <vmx>?dcPath=...&dsName=... » que construit
     `SourceVm.vmx_spec`, puis l'alternative « moref=<moRef> » documentée par
     un fil Broadcom Community pour un cas d'échec proche — non confirmée
@@ -471,7 +471,7 @@ def _open_strategies(vm, snapshot, disks_now, disk):
 
 def _measure_read(conn, disks, args, dest: dict, vm=None, snapshot=None) -> None:
     """`dest` reçoit `read` et `open_attempts` — un dict par essai de vmxSpec
-    (HANDOFF §5 ter), pas nécessairement la section `mesure` du rapport."""
+    (journal §5 ter), pas nécessairement la section `mesure` du rapport."""
     s = dest
     s["read"] = {}
     sample = args.sample_mib * (1 << 20)

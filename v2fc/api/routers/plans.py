@@ -120,7 +120,7 @@ async def set_plan_target(plan_id: uuid.UUID, body: PlanTargetUpdate,
                           _user: User = Depends(require_role("operator"))) -> Plan:
     """
     Choix de l'environnement FusionCompute cible d'un plan (étape 3 du flux
-    voulu par Nicolas, 17/09/2026) — séparé de la création du plan : le plan
+    voulu, 17/09/2026) — séparé de la création du plan : le plan
     existe déjà (créé depuis l'inventaire source) avant qu'une cible ne soit
     choisie, donc c'est une mise à jour, pas un champ de PlanCreate.
     """

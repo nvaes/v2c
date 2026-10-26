@@ -2,7 +2,7 @@
 Redis — mémorise le dernier inventaire connu (vSphere) et les dernières
 listes de datastores/réseaux (FusionCompute) obtenues d'un endpoint, pour
 éviter de rescanner toutes les VM à chaque ouverture de page : un inventaire
-complet avec pré-vérification par VM est loin d'être instantané, et Nicolas
+complet avec pré-vérification par VM est loin d'être instantané, et l'utilisateur
 n'a pas besoin qu'il soit rejoué à chaque connexion (17/09/2026).
 
 Pas de TTL : la dernière valeur connue reste servie indéfiniment tant que
@@ -19,7 +19,7 @@ down`) : la page relance alors un scan complet au prochain chargement,
 exactement comme avant ce changement.
 
 Sert aussi, depuis le 17/09/2026, à publier une progression fine pendant un
-inventaire vCenter (ci-dessous, section « Progression ») : Nicolas a demandé
+inventaire vCenter (ci-dessous, section « Progression ») : l'utilisateur a demandé
 un statut d'avancement pendant le scan, qui est justement l'opération lente
 que le cache ci-dessus cherche à éviter de rejouer inutilement. Contrairement
 à l'inventaire, cette progression EST transitoire par nature (elle ne décrit

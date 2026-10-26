@@ -1,6 +1,6 @@
 """delta manuel ou planifié au lieu du delta périodique automatique (26/10/2026).
 
-Demande de Nicolas : pas de delta toutes les N minutes ; un delta se lance
+Demande utilisateur : pas de delta toutes les N minutes ; un delta se lance
 à la main ou à une date choisie (planificateur, répétable chaque jour).
 
 - `delta_requested` : delta demandé « maintenant », pris par le runner ;

@@ -2,11 +2,11 @@
 
 Ce dossier regroupe l'installation de la solution complète : le socle web
 (API + interface + Postgres + Redis) et le Data Mover (VDDK). Il consolide
-des procédures déjà validées sur le terrain — voir `HANDOFF.md` §11 pour le
+des procédures déjà validées sur le terrain — voir `docs/dev/JOURNAL.md` §11 pour le
 socle web (validé le 16/09/2026) et `v2fc/README.md` pour le Data Mover
 (validé le 15-17/09/2026, y compris contre un vCenter réel) — sans en
 changer le contenu. En cas de divergence entre ce dossier et l'un de ces
-deux documents, **HANDOFF.md et v2fc/README.md font foi** : le signaler
+deux documents, **docs/dev/JOURNAL.md et v2fc/README.md font foi** : le signaler
 pour que ce dossier soit corrigé.
 
 **À maintenir à jour jusqu'à la livraison finale du projet** : toute
@@ -69,7 +69,7 @@ Pour arrêter :
 ```
 
 Dépannage détaillé (ports déjà utilisés, API qui ne démarre pas au premier
-essai, `.env` non trouvé, etc.) : `HANDOFF.md` §11, section « Dépannage ».
+essai, `.env` non trouvé, etc.) : `docs/dev/JOURNAL.md` §11, section « Dépannage ».
 
 ## Installer le Data Mover (VDDK)
 
@@ -110,7 +110,7 @@ font dans le même processus, sans protocole réseau à construire.
 
 Ce qui suit est la procédure complète pour ce cas de figure : socle web
 (API/web/Postgres/Redis) **et** Data Mover sur la même VM. L'installation
-de l'OS reste à la charge de Nicolas (Ubuntu Server LTS x86-64, un noyau
+de l'OS reste à la charge de l'exploitant (Ubuntu Server LTS x86-64, un noyau
 récent — glibc ≥ 2.16 exigée par le VDDK, D1) ; ce qui suit démarre une
 fois l'OS prêt et accessible en SSH.
 
@@ -159,7 +159,7 @@ racine du même dossier que `v2fc/` sur la VM — voir §Data Mover plus haut,
 même procédure, juste sur la VM plutôt que sur ton Mac :
 
 ```bash
-rsync -av VMware-vix-disklib-8.0.3-23950268.x86_64.tar.gz nicolas@<ip-vm>:~/v2fc-deploy/
+rsync -av VMware-vix-disklib-8.0.3-23950268.x86_64.tar.gz utilisateur@<ip-vm>:~/v2fc-deploy/
 # puis, sur la VM :
 cd ~/v2fc-deploy && tar xzf VMware-vix-disklib-8.0.3-23950268.x86_64.tar.gz
 ```
@@ -269,7 +269,7 @@ build-datamover.sh    construit l'image Docker du Data Mover
 
 - La bascule finale (création de la VM cible sur FusionCompute) : écrite
   mais pas encore validée en réel. Création de volumes, écriture et seed
-  le sont (`HANDOFF.md` §20-22).
+  le sont (`docs/dev/JOURNAL.md` §20-22).
 - Un déploiement de production (le service `web` sert le serveur de
   développement Vite, pas un build statique servi par nginx — cf.
   commentaire en tête de `v2fc/web/Dockerfile` : à revoir quand le projet

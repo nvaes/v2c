@@ -1,6 +1,6 @@
 """élargit en BIGINT les colonnes qui comptent des octets (17/09/2026, soir).
 
-Trouvé en conditions réelles par Nicolas : `job_disks.capacity_bytes` était
+Trouvé en conditions réelles : `job_disks.capacity_bytes` était
 un INTEGER (int4, max ~2,147 Go) alors qu'une capacité de disque en octets
 dépasse cette limite dès qu'un disque fait plus de ~2 Gio — le disque de
 test_ubuntu (4 Gio = 4 294 967 296 octets) faisait déjà planter

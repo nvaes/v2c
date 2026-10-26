@@ -445,7 +445,7 @@ class Connection:
         l'appelant, et renvoie (étiquette acceptée, connexion) pour la
         première qui convient.
 
-        HANDOFF §5 quater/L1 (cycle réel du 15/09/2026) : `VixDiskLib_ConnectEx`
+        journal §5 quater/L1 (cycle réel du 15/09/2026) : `VixDiskLib_ConnectEx`
         réussit pour N'IMPORTE QUELLE forme de vmxSpec testée jusqu'ici — le
         rejet (« Invalid search specifier ») n'apparaît qu'à
         `VixDiskLib_Open()`. Se fier à la seule réussite de la connexion pour

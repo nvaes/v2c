@@ -77,7 +77,7 @@ export default function LogsPage() {
 }
 
 /**
- * Onglet « Logs » de la barre de navigation (demande de Nicolas,
+ * Onglet « Logs » de la barre de navigation (demande utilisateur,
  * 17/09/2026 : « un onglet logs avec les logs en cours ») — liste les jobs
  * ayant une activité, plutôt qu'un flux global : le détail (page ci-dessus)
  * reste par job, plus lisible qu'un mélange de tous les journaux ensemble.

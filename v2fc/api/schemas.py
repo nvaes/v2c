@@ -53,7 +53,7 @@ class PasswordChange(BaseModel):
 
 # --------------------------------------------------------------------------
 # Endpoints (vCenter ou ESXi — même « kind » : datamover.vsphere.VSphereClient
-# gère les deux de façon transparente, voir HANDOFF.md)
+# gère les deux de façon transparente, voir docs/dev/JOURNAL.md)
 # --------------------------------------------------------------------------
 class EndpointCreate(BaseModel):
     kind: str = Field(default="vcenter", pattern="^(vcenter|fusioncompute)$")
@@ -289,8 +289,8 @@ class RelayOut(BaseModel):
 
 # --------------------------------------------------------------------------
 # Jobs — ARCHITECTURE.md §5 (machine à états) et §8.1. Ajouté le 17/09/2026
-# à la demande explicite de Nicolas (onglets Migration/Logs), une fois L1
-# validé deux fois sur plateforme réelle (HANDOFF.md §5 sexies).
+# à la demande explicite de l'utilisateur (onglets Migration/Logs), une fois L1
+# validé deux fois sur plateforme réelle (docs/dev/JOURNAL.md §5 sexies).
 # --------------------------------------------------------------------------
 class JobCreate(BaseModel):
     plan_vm_id: uuid.UUID
@@ -353,10 +353,9 @@ class JobOut(BaseModel):
 class JobRunContext(BaseModel):
     """
     Ce qu'il faut à `tools/v2fc_source.py job-run` pour exécuter un round —
-    volontairement dépourvu de tout secret (§13 : jamais de mot de passe
-    renvoyé par l'API). Les identifiants source restent fournis par Nicolas
-    lui-même via V2FC_VC_PASSWORD, exactement comme aujourd'hui en CLI
-    manuelle — ce champ ne change pas cette discipline.
+    volontairement dépourvu de tout secret (§13). Les identifiants source
+    passent par V2FC_VC_USER/V2FC_VC_PASSWORD : fournis par le runner
+    (route qui lui est réservée), ou par l'opérateur en lancement manuel.
     """
     job_id: uuid.UUID
     round_id: uuid.UUID

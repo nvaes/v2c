@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # V2FC — démarre le socle web (Postgres, Redis, API, web).
-# Reprend la procédure validée dans HANDOFF.md §11 (points 2 à 4), sans rien
+# Reprend la procédure validée dans docs/dev/JOURNAL.md §11 (points 2 à 4), sans rien
 # y ajouter. Ne crée PAS le premier compte : cette étape reste interactive
 # et manuelle à dessein (api/seed_admin.py n'accepte jamais de mot de passe
 # en argument) — ce script l'affiche en dernière ligne, à lancer soi-même.
@@ -52,4 +52,4 @@ echo "premier administrateur — mot de passe demandé de façon interactive :"
 echo "  docker compose exec api python3 -m api.seed_admin --email TON_EMAIL"
 echo
 echo "Interface web : http://localhost:5173"
-echo "Dépannage : voir install/README.md ou HANDOFF.md §11."
+echo "Dépannage : voir install/README.md ou docs/dev/JOURNAL.md §11."

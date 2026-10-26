@@ -152,8 +152,8 @@ export default function EndpointsPage() {
               const kind = e.target.value as EndpointCreate["kind"];
               // Le port par défaut de vCenter/ESXi (443) n'a aucune raison
               // de convenir à FusionCompute — ARCHITECTURE.md §7.5 documente
-              // 7443 pour l'API VRM (à vérifier sur ce lab, voir HANDOFF.md
-              // §12 : 8443 est l'adresse console que Nicolas a donnée).
+              // 7443 pour l'API VRM (à vérifier sur ce lab, voir docs/dev/JOURNAL.md
+              // §12 : 8443 est l'adresse console de la console).
               const port = kind === "fusioncompute" && form.kind !== "fusioncompute" ? 7443
                 : kind === "vcenter" && form.kind !== "vcenter" ? 443
                 : form.port;
@@ -178,7 +178,7 @@ export default function EndpointsPage() {
           <input
             value={form.url}
             onChange={(e) => setForm({ ...form, url: e.target.value })}
-            placeholder="172.25.100.91"
+            placeholder="192.0.2.30"
             required
           />
         </div>
