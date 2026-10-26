@@ -1809,3 +1809,16 @@ premier administrateur (`--admin-email`, mot de passe au clavier ; sauté si
 un compte existe). Relançable. Écrit après une désinstallation complète du
 serveur relais (application, données et Docker) pour valider une
 installation depuis zéro.
+
+## 32. Installation neuve : schéma créé au démarrage (26/10/2026)
+
+Première réinstallation complète du serveur relais : l'API ne démarrait pas
+(`DuplicateColumn endpoints.port`). La migration 0001 crée le schéma depuis
+les modèles *actuels* (`create_all`), qui contiennent déjà ce qu'ajoutent
+0002-0008 : enchaînées sur une base vide, ces migrations échouaient. Le
+serveur ne l'avait jamais montré (base migrée au fil de l'eau). Correctif :
+`api/migrate.py` remplace `alembic upgrade head` au démarrage — base vide :
+`create_all` puis `alembic stamp head` ; base existante : `upgrade head`.
+Vérifié : installation neuve (schéma conforme, stamp 0008) puis redémarrage
+(chemin upgrade, rien à faire). Règle pour la suite : chaque nouvelle
+migration doit aussi être reflétée dans `api/models.py`.

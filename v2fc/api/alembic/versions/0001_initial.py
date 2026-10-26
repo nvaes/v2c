@@ -19,11 +19,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Première migration : on laisse SQLAlchemy créer le schéma depuis les
-    # modèles ORM plutôt que de le retranscrire à la main en op.create_table
-    # — cohérence garantie avec api/models.py. Les migrations suivantes,
-    # une fois le schéma stabilisé, devront passer par un vrai
-    # `alembic revision --autogenerate`.
+    # Crée le schéma depuis les modèles ORM. N'est plus exécutée sur une
+    # installation neuve : api/migrate.py crée alors le schéma complet et
+    # marque la base à jour (sinon 0002+ échoueraient, leurs colonnes
+    # existant déjà). Conservée pour l'historique des bases existantes.
     bind = op.get_bind()
     Base.metadata.create_all(bind=bind, checkfirst=True)
 

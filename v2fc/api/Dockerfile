@@ -20,4 +20,4 @@ COPY relay/     /work/relay/
 COPY api/       /work/api/
 
 EXPOSE 8000
-CMD ["/bin/bash", "-c", "cd /work/api && alembic upgrade head && cd /work && uvicorn api.main:app --host 0.0.0.0 --port 8000"]
+CMD ["/bin/bash", "-c", "cd /work/api && python3 -m api.migrate && cd /work && uvicorn api.main:app --host 0.0.0.0 --port 8000"]
