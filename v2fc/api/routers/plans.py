@@ -12,7 +12,7 @@ from .. import vsphere_bridge
 from ..db import get_db
 from ..models import Credential, Endpoint, Job, Plan, PlanVm, User
 from ..schemas import (PlanCreate, PlanOut, PlanPreflightResponse, PlanTargetUpdate,
-                       PlanVmMappingUpdate)
+                       PlanVmMappingUpdate, SourceNic)
 from ..security import decrypt_credential_password, require_role
 
 router = APIRouter(prefix="/api/v1/plans", tags=["plans"])
@@ -87,6 +87,31 @@ async def plan_preflight(plan_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     return {"plan_id": plan_id, "vms": vms}
 
 
+@router.get("/{plan_id}/source-nics", response_model=dict[str, list[SourceNic]])
+async def plan_source_nics(plan_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                           _user: User = Depends(require_role("viewer"))) -> dict:
+    """Cartes réseau actuelles de chaque VM du plan, lues sur le vCenter/ESXi
+    source, par id de VM de plan — base du mapping réseau carte par carte."""
+    result = await db.execute(
+        select(Plan).where(Plan.id == plan_id).options(selectinload(Plan.vms)))
+    plan = result.scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="plan introuvable")
+
+    endpoint = await db.get(Endpoint, plan.source_id)
+    cred = await db.get(Credential, endpoint.credential_id)
+    try:
+        by_uuid = await run_in_threadpool(
+            vsphere_bridge.nics_many, host=endpoint.url, user=cred.username,
+            password=decrypt_credential_password(cred), port=endpoint.port or 443,
+            verify_tls=endpoint.verify_tls,
+            instance_uuids=[v.src_instance_uuid for v in plan.vms])
+    except Exception as exc:                            # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"connexion à {endpoint.name} impossible : {exc}") from exc
+    return {str(v.id): by_uuid.get(v.src_instance_uuid, []) for v in plan.vms}
+
+
 @router.put("/{plan_id}/target", response_model=PlanOut)
 async def set_plan_target(plan_id: uuid.UUID, body: PlanTargetUpdate,
                           db: AsyncSession = Depends(get_db),
@@ -140,6 +165,12 @@ async def set_plan_vm_mapping(plan_id: uuid.UUID, plan_vm_id: uuid.UUID,
     if body.network_urn is not None:
         plan_vm.tgt_network_urn = body.network_urn
         plan_vm.tgt_network_name = body.network_name
+    if body.nics is not None:
+        nics = sorted(body.nics, key=lambda n: n.device_key)
+        plan_vm.nic_mappings = [n.model_dump() for n in nics]
+        first = next((n for n in nics if n.tgt_network_urn), None)
+        plan_vm.tgt_network_urn = first.tgt_network_urn if first else None
+        plan_vm.tgt_network_name = first.tgt_network_name if first else None
     await db.commit()
 
     result = await db.execute(

@@ -163,6 +163,26 @@ class PlanCreate(BaseModel):
     vms: list[PlanVmIn] = Field(min_length=1)
 
 
+class PlanNicMapping(BaseModel):
+    """Une carte réseau de la VM source et son réseau FusionCompute cible
+    (`tgt_network_urn` absent : carte non recréée à la bascule)."""
+    device_key: int
+    label: str
+    adapter: str = ""
+    mac: str = ""
+    src_network: str = ""
+    tgt_network_urn: str | None = None
+    tgt_network_name: str | None = None
+
+
+class SourceNic(BaseModel):
+    device_key: int
+    label: str
+    adapter: str
+    mac: str
+    network: str
+
+
 class PlanVmOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -173,6 +193,7 @@ class PlanVmOut(BaseModel):
     tgt_datastore_name: str | None = None
     tgt_network_urn: str | None = None
     tgt_network_name: str | None = None
+    nic_mappings: list[PlanNicMapping] = Field(default_factory=list)
 
 
 class PlanOut(BaseModel):
@@ -213,6 +234,8 @@ class PlanVmMappingUpdate(BaseModel):
     datastore_name: str | None = None
     network_urn: str | None = None
     network_name: str | None = None
+    # Mapping par carte (remplace network_* si fourni).
+    nics: list[PlanNicMapping] | None = None
 
 # --------------------------------------------------------------------------
 # Relais (VM agent dans le cluster FusionCompute, ARCHITECTURE.md §7.1/§13)

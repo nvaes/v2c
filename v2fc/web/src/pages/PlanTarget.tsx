@@ -6,12 +6,15 @@ import {
   FcDatastore,
   FcNetwork,
   PlanOut,
+  PlanVmOut,
+  SourceNic,
 } from "../api";
 
 /**
  * Étapes 3-5 du flux voulu par Nicolas (17/09/2026) : choisir un
  * environnement FusionCompute cible pour le plan, puis, pour chaque VM du
- * plan, choisir le datastore et le réseau de destination.
+ * plan, choisir le datastore et le réseau de destination — un réseau par
+ * carte réseau de la VM source (26/10/2026, cartes lues sur le vCenter).
  *
  * Volontairement séparée de Plans.tsx : la sélection de VM (Inventory.tsx)
  * et le mapping cible sont deux moments différents du flux, avec des
@@ -37,6 +40,12 @@ export default function PlanTargetPage() {
   const [pendingMapping, setPendingMapping] = useState<
     Record<string, { datastoreUrn: string; networkUrn: string }>
   >({});
+  // Cartes réseau source par VM de plan (undefined : pas encore lues ou
+  // vCenter injoignable -> repli sur un seul réseau par VM).
+  const [sourceNics, setSourceNics] = useState<Record<string, SourceNic[]> | null>(null);
+  const [nicsError, setNicsError] = useState<string | null>(null);
+  // Choix en cours par VM puis par clé de carte ("" = ne pas recréer).
+  const [pendingNics, setPendingNics] = useState<Record<string, Record<number, string>>>({});
 
   const fcEndpoints = useMemo(
     () => endpoints.filter((e) => e.kind === "fusioncompute"),
@@ -78,6 +87,30 @@ export default function PlanTargetPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan?.target_id]);
 
+  useEffect(() => {
+    if (!id || !plan?.target_id) return;
+    setNicsError(null);
+    api.getPlanSourceNics(id)
+      .then(setSourceNics)
+      .catch((e) => setNicsError(String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, plan?.target_id]);
+
+  // Réseau cible affiché pour une carte : choix en cours, sinon mapping
+  // enregistré, sinon (plan d'avant le mapping par carte) l'ancien réseau
+  // unique pour la première carte.
+  function nicTarget(vm: PlanVmOut, nic: SourceNic, index: number): string {
+    const pending = pendingNics[vm.id]?.[nic.device_key];
+    if (pending !== undefined) return pending;
+    const saved = vm.nic_mappings.find((m) => m.device_key === nic.device_key);
+    if (saved) return saved.tgt_network_urn ?? "";
+    return index === 0 && vm.nic_mappings.length === 0 ? vm.tgt_network_urn ?? "" : "";
+  }
+
+  function setPendingNic(vmId: string, deviceKey: number, urn: string) {
+    setPendingNics((prev) => ({ ...prev, [vmId]: { ...prev[vmId], [deviceKey]: urn } }));
+  }
+
   async function submitTarget() {
     if (!id || !selectedTarget) return;
     setSettingTarget(true);
@@ -118,6 +151,7 @@ export default function PlanTargetPage() {
     const netUrn = pending.networkUrn || vm.tgt_network_urn || "";
     const ds = datastores.find((d) => d.urn === dsUrn);
     const net = networks.find((n) => n.urn === netUrn);
+    const nics = sourceNics?.[vmId];
     setSavingVm(vmId);
     setError(null);
     setSavedVm(null);
@@ -125,10 +159,29 @@ export default function PlanTargetPage() {
       const updated = await api.setPlanVmMapping(id, vmId, {
         datastore_urn: dsUrn || null,
         datastore_name: ds?.name ?? (dsUrn ? vm.tgt_datastore_name : null),
-        network_urn: netUrn || null,
-        network_name: net?.name ?? (netUrn ? vm.tgt_network_name : null),
+        ...(nics && nics.length > 0
+          ? {
+              nics: nics.map((nic, i) => {
+                const urn = nicTarget(vm, nic, i);
+                return {
+                  device_key: nic.device_key, label: nic.label, adapter: nic.adapter,
+                  mac: nic.mac, src_network: nic.network,
+                  tgt_network_urn: urn || null,
+                  tgt_network_name: urn ? networks.find((n) => n.urn === urn)?.name ?? null : null,
+                };
+              }),
+            }
+          : {
+              network_urn: netUrn || null,
+              network_name: net?.name ?? (netUrn ? vm.tgt_network_name : null),
+            }),
       });
       setPlan(updated);
+      setPendingNics((prev) => {
+        const next = { ...prev };
+        delete next[vmId];
+        return next;
+      });
       // On efface l'override "pending" : l'état vient d'être confirmé par
       // le serveur, l'affichage doit repartir de vm.tgt_* (source de
       // vérité) et donc pouvoir réafficher le libellé "actuel : ...".
@@ -153,12 +206,17 @@ export default function PlanTargetPage() {
       </button>
       <h1>Cible FusionCompute — {plan?.name ?? "…"}</h1>
       <p className="muted">
-        Étapes 3 à 5 : connexion à un environnement FusionCompute, puis choix du datastore et du
-        réseau de destination pour chaque VM du plan. La copie elle-même (étapes 6-8) n'est pas
-        encore implémentée — voir HANDOFF.md.
+        Étapes 3 à 5 : connexion à un environnement FusionCompute, puis choix du datastore et,
+        pour chaque carte réseau de la VM source, du réseau de destination. Une carte laissée sur
+        « ne pas recréer » n'existera pas sur la VM migrée.
       </p>
 
       {error && <p className="error">{error}</p>}
+      {nicsError && (
+        <p className="muted">
+          Cartes réseau source illisibles ({nicsError}) — un seul réseau par VM en attendant.
+        </p>
+      )}
       {loading && <p className="muted">Chargement…</p>}
 
       {!loading && plan && !plan.target_id && (
@@ -210,7 +268,7 @@ export default function PlanTargetPage() {
                 <tr>
                   <th>VM</th>
                   <th>Datastore cible</th>
-                  <th>Réseau cible</th>
+                  <th>Réseaux (une ligne par carte source)</th>
                   <th></th>
                 </tr>
               </thead>
@@ -219,6 +277,10 @@ export default function PlanTargetPage() {
                   const pending = pendingFor(vm.id);
                   const currentDs = pending.datastoreUrn || vm.tgt_datastore_urn || "";
                   const currentNet = pending.networkUrn || vm.tgt_network_urn || "";
+                  const nics = sourceNics?.[vm.id];
+                  const anyNet = nics && nics.length > 0
+                    ? nics.some((nic, i) => nicTarget(vm, nic, i) !== "")
+                    : !!currentNet;
                   return (
                     <tr key={vm.id}>
                       <td>{vm.src_vm_name}</td>
@@ -240,6 +302,34 @@ export default function PlanTargetPage() {
                         )}
                       </td>
                       <td>
+                        {nics && nics.length > 0 ? (
+                          nics.map((nic, i) => (
+                            <div key={nic.device_key} style={{ marginBottom: 6 }}>
+                              <div className="muted">
+                                {nic.label} · {nic.adapter} · {nic.mac} — source : {nic.network || "?"}
+                              </div>
+                              <select
+                                value={nicTarget(vm, nic, i)}
+                                onChange={(e) => setPendingNic(vm.id, nic.device_key, e.target.value)}
+                              >
+                                <option value="">— ne pas recréer cette carte —</option>
+                                {networks.map((net) => (
+                                  <option key={net.urn} value={net.urn}>
+                                    {net.dvswitch_name} / {net.name}
+                                    {net.vlan_id != null ? ` (VLAN ${net.vlan_id})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ))
+                        ) : (
+                        <>
+                        {sourceNics === null && !nicsError && (
+                          <div className="muted">lecture des cartes réseau source…</div>
+                        )}
+                        {nics && nics.length === 0 && (
+                          <div className="muted">aucune carte réseau sur la VM source</div>
+                        )}
                         <select
                           value={currentNet}
                           onChange={(e) => setPending(vm.id, { networkUrn: e.target.value })}
@@ -255,11 +345,13 @@ export default function PlanTargetPage() {
                         {vm.tgt_network_name && !pending.networkUrn && (
                           <div className="muted">actuel : {vm.tgt_network_name}</div>
                         )}
+                        </>
+                        )}
                       </td>
                       <td>
                         <button
                           className="secondary"
-                          disabled={savingVm === vm.id || (!currentDs && !currentNet)}
+                          disabled={savingVm === vm.id || (!currentDs && !anyNet)}
                           onClick={() => saveMapping(vm.id)}
                         >
                           {savingVm === vm.id ? "…" : "Enregistrer"}

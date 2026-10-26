@@ -1692,3 +1692,24 @@ VMware → FusionCompute complète de bout en bout. Restent ouverts :
 une seule carte réseau créée (la source en a deux), de type virtio (pas de
 réseau sous Windows avant les outils FusionCompute) ; la signature V2FC
 reste dans le dernier secteur du volume (hors des 100 Gio de données).
+
+## 25. Mapping réseau par carte (26/10/2026)
+
+Demande de Nicolas après la bascule de R00vSkypeEd (deux cartes source, une
+seule recréée) : un réseau de destination par carte réseau source.
+
+- `SourceVm.nics()` : clé, libellé, type (E1000e, Vmxnet3...), MAC et
+  réseau source (port group distribué résolu par son nom via `vm.network`).
+  Exposé par `GET /plans/{id}/source-nics` (une connexion vCenter pour tout
+  le plan).
+- `plan_vms.nic_mappings` (JSON, migration 0005) ; `PUT .../mapping` accepte
+  `nics` et garde `tgt_network_*` = première carte mappée (plans existants,
+  validation de création de job).
+- Page « Cible FusionCompute » : une liste déroulante par carte, avec
+  « ne pas recréer cette carte ». Repli sur un seul réseau si le vCenter est
+  injoignable.
+- Bascule : une carte FusionCompute par carte mappée, dans l'ordre des clés
+  source (`_target_nics`). Les MAC source ne sont pas reprises.
+
+Vérifié sur le vCenter réel : R00vSkypeEd = 2 × E1000e (« VLAN 2552 – BE
+Server », « DMZ DPortGroup »), R00vSkype-OVOC = 1 × Vmxnet3.

@@ -500,3 +500,28 @@ def test_round_progress_reports_start_resume_offset_and_end(monkeypatch):
     p.update(10)      # 10 s : envoi
     p.update(40)      # fin du round : envoi immédiat
     assert calls == [(100, 40), (100, 60), (100, 100)]
+
+
+# --------------------------------------------------------------------------
+# Cartes réseau source (mapping réseau par carte, 26/10/2026)
+# --------------------------------------------------------------------------
+def test_nics_lists_each_card_with_its_source_network():
+    e1000e = vim.vm.device.VirtualE1000e()
+    e1000e.key, e1000e.macAddress = 4001, "00:50:56:a8:15:58"
+    e1000e.deviceInfo = vim.Description(label="Network adapter 2", summary="")
+    e1000e.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo(deviceName="VM Network")
+
+    vmxnet3 = vim.vm.device.VirtualVmxnet3()
+    vmxnet3.key, vmxnet3.macAddress = 4000, "00:50:56:a8:37:de"
+    vmxnet3.deviceInfo = vim.Description(label="Network adapter 1", summary="")
+    port = vim.dvs.PortConnection(portgroupKey="dvportgroup-12", switchUuid="x")
+    vmxnet3.backing = vim.vm.device.VirtualEthernetCard.DistributedVirtualPortBackingInfo(port=port)
+
+    vm = make_vm([make_disk(), e1000e, vmxnet3])
+    vm.network = []          # port group distribué non résolu : la clé est rendue
+    nics = _bare(vm).nics()
+
+    assert [n["device_key"] for n in nics] == [4000, 4001]
+    assert nics[0] == {"device_key": 4000, "label": "Network adapter 1", "adapter": "Vmxnet3",
+                       "mac": "00:50:56:a8:37:de", "network": "dvportgroup-12"}
+    assert nics[1]["adapter"] == "E1000e" and nics[1]["network"] == "VM Network"

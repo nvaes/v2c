@@ -75,6 +75,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ target_id: targetId }),
     }),
+  getPlanSourceNics: (planId: string) =>
+    request<Record<string, SourceNic[]>>(`/plans/${planId}/source-nics`),
   setPlanVmMapping: (planId: string, planVmId: string, body: PlanVmMappingUpdate) =>
     request<PlanOut>(`/plans/${planId}/vms/${planVmId}/mapping`, {
       method: "PUT",
@@ -134,6 +136,15 @@ export interface PlanVmOut {
   id: string; src_vm_moref: string; src_instance_uuid: string; src_vm_name: string;
   tgt_datastore_urn: string | null; tgt_datastore_name: string | null;
   tgt_network_urn: string | null; tgt_network_name: string | null;
+  nic_mappings: PlanNicMapping[];
+}
+// Une carte réseau source et son réseau FusionCompute (null : non recréée).
+export interface PlanNicMapping {
+  device_key: number; label: string; adapter: string; mac: string; src_network: string;
+  tgt_network_urn: string | null; tgt_network_name: string | null;
+}
+export interface SourceNic {
+  device_key: number; label: string; adapter: string; mac: string; network: string;
 }
 export interface PlanOut {
   id: string; name: string; source_id: string; target_id: string | null;
@@ -158,6 +169,7 @@ export interface FcNetworksResponse { networks: FcNetwork[]; }
 export interface PlanVmMappingUpdate {
   datastore_urn?: string | null; datastore_name?: string | null;
   network_urn?: string | null; network_name?: string | null;
+  nics?: PlanNicMapping[];
 }
 
 // -- relais et jobs (ARCHITECTURE.md §5/§7.1, ajoutés le 17/09/2026) ------

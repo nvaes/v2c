@@ -133,3 +133,17 @@ def preflight_many(host: str, user: str, password: str, port: int, verify_tls: b
                            "findings": [{"severity": "BLOCK", "code": "INTROUVABLE",
                                         "message": str(exc), "remedy": "", "subject": ""}]})
     return out
+
+
+def nics_many(host: str, user: str, password: str, port: int, verify_tls: bool,
+              instance_uuids: list[str]) -> dict[str, list[dict]]:
+    """Cartes réseau de chaque VM (SourceVm.nics), une seule connexion. VM
+    introuvable : liste vide plutôt qu'une erreur pour tout le plan."""
+    out: dict[str, list[dict]] = {}
+    with VSphereClient(host, user, password, port=port, verify=verify_tls) as client:
+        for iu in instance_uuids:
+            try:
+                out[iu] = client.find_vm(instance_uuid=iu).nics()
+            except VSphereError:
+                out[iu] = []
+    return out

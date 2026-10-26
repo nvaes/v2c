@@ -151,6 +151,9 @@ class PlanVm(Base):
     tgt_datastore_name: Mapped[str | None]
     tgt_network_urn: Mapped[str | None]
     tgt_network_name: Mapped[str | None]
+    # Une entrée par carte réseau source (migration 0005) ; tgt_network_*
+    # ci-dessus = première carte mappée.
+    nic_mappings: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
 
     plan: Mapped["Plan"] = relationship(back_populates="vms")
 

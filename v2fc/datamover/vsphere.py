@@ -319,6 +319,35 @@ class SourceVm:
     def guest_id(self) -> str:
         return self.raw.config.guestId or ""
 
+    def nics(self) -> list[dict]:
+        """
+        Cartes réseau, dans l'ordre des clés de périphérique : clé, libellé,
+        type d'adaptateur (E1000e, Vmxnet3...), MAC et réseau source. Le nom
+        d'un port group distribué n'est pas dans le backing (seulement sa
+        clé) : il est résolu via `vm.network`.
+        """
+        dvs_names = {net.key: net.name for net in (self.raw.network or [])
+                     if isinstance(net, vim.dvs.DistributedVirtualPortgroup)}
+        out = []
+        for dev in self.raw.config.hardware.device:
+            if not isinstance(dev, vim.vm.device.VirtualEthernetCard):
+                continue
+            backing = dev.backing
+            if isinstance(backing, vim.vm.device.VirtualEthernetCard.DistributedVirtualPortBackingInfo):
+                network = dvs_names.get(backing.port.portgroupKey, backing.port.portgroupKey)
+            elif isinstance(backing, vim.vm.device.VirtualEthernetCard.NetworkBackingInfo):
+                network = backing.deviceName
+            else:
+                network = type(backing).__name__
+            out.append({
+                "device_key": dev.key,
+                "label": dev.deviceInfo.label if dev.deviceInfo else f"NIC {dev.key}",
+                "adapter": type(dev).__name__.rsplit(".", 1)[-1].replace("Virtual", ""),
+                "mac": dev.macAddress or "",
+                "network": network or "",
+            })
+        return sorted(out, key=lambda n: n["device_key"])
+
     @property
     def is_encrypted(self) -> bool:
         """VM chiffrée : le VDDK ne peut pas lire ses disques."""

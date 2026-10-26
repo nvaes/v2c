@@ -460,12 +460,12 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
                     cpu_count=hw["cpu"], memory_mb=hw["memory_mb"],
                     os_type=os_type, os_version=os_version,
                     boot_firmware="UEFI" if hw["firmware"] == "efi" else "BIOS",
-                    nics=[{"portGroupUrn": plan_vm.tgt_network_urn}]
-                    if plan_vm and plan_vm.tgt_network_urn else [])
+                    nics=_target_nics(plan_vm))
                 fc_client.wait_task(create_resp["taskUri"])
                 job.tgt_vm_uri = create_resp["uri"]
                 await _log(db, job.id,
-                           f"VM cible créée : {hw['cpu']} vCPU, {hw['memory_mb']} Mo, "
+                           f"VM cible créée : {len(_target_nics(plan_vm))} carte(s) réseau, "
+                           f"{hw['cpu']} vCPU, {hw['memory_mb']} Mo, "
                            f"{hw['firmware'].upper()}, OS « {os_label} » "
                            f"(source : {hw['guest_name']})")
                 await db.commit()
@@ -496,6 +496,18 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
     await _log(db, job.id, "bascule terminée — VM cible créée sur FusionCompute. Disques en "
                            "IDE : installer les outils FusionCompute dans la VM avant de les "
                            "passer en VIRTIO (performances)")
+
+
+def _target_nics(plan_vm: PlanVm | None) -> list[dict]:
+    """Une carte FusionCompute par carte source mappée, dans l'ordre source ;
+    plan antérieur au mapping par carte : la seule carte de tgt_network_urn."""
+    if plan_vm is None:
+        return []
+    mapped = [n for n in (plan_vm.nic_mappings or []) if n.get("tgt_network_urn")]
+    if mapped:
+        return [{"portGroupUrn": n["tgt_network_urn"]}
+                for n in sorted(mapped, key=lambda n: n["device_key"])]
+    return [{"portGroupUrn": plan_vm.tgt_network_urn}] if plan_vm.tgt_network_urn else []
 
 
 # Une VM venue de VMware n'a pas de pilote virtio (Windows en particulier :
