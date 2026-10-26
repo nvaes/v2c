@@ -185,12 +185,14 @@ Pensez à générer le rapport **avant** de supprimer le plan.
 | « espace insuffisant sur le datastore… » | Choisir un datastore plus grand dans la cible du plan. |
 | « le relais porte déjà N disques… » | Terminer ou supprimer d'autres migrations en cours. |
 | Copie en échec | Elle est relancée automatiquement après 5 minutes. Le message d'erreur est dans l'onglet Logs. |
+| Snapshot `v2fc-…` resté sur la VM source | Laissé par une copie interrompue : il est supprimé automatiquement au début de la copie suivante de cette VM. |
 | « CBT invalidé » | VMware a réinitialisé le suivi des changements (restauration de snapshot, par exemple) : une nouvelle copie complète est faite automatiquement. |
 
 ## 10. Limites connues
 
-- Débit d'une copie : de l'ordre de 70 Mio/s par VM (NBD chiffré). Plusieurs
-  VM peuvent être copiées en parallèle (4 par défaut).
+- Débit : de l'ordre de 70 Mio/s pour une copie seule (NBD chiffré). Jusqu'à
+  4 VM sont copiées en parallèle : environ 50 Mio/s chacune, soit environ
+  190 Mio/s au total (mesuré : 1,6 Gbit/s reçus par la VM relais).
 - Disques de destination en IDE à la bascule (voir §6).
 - Une seule VM relais par environnement FusionCompute : celle qui héberge
   V2FC.
