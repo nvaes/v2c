@@ -43,6 +43,9 @@ export default function MigrationPage() {
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [autoRestart, setAutoRestart] = useState<Record<string, boolean>>({});
+  // Relais choisi par VM de plan avant création du job ("" = aucun relais,
+  // écriture locale). Absent = premier relais de la cible du plan.
+  const [relayChoice, setRelayChoice] = useState<Record<string, string>>({});
 
   function refresh() {
     setLoading(true);
@@ -70,11 +73,25 @@ export default function MigrationPage() {
     return jobs.find((j) => j.src_instance_uuid === vm.src_instance_uuid);
   }
 
-  async function createJob(planVmId: string) {
+  function relaysFor(plan: PlanOut): RelayOut[] {
+    return relays.filter((r) => r.target_id === plan.target_id);
+  }
+
+  function chosenRelayId(plan: PlanOut, planVmId: string): string {
+    return relayChoice[planVmId] ?? relaysFor(plan)[0]?.id ?? "";
+  }
+
+  function relayLabel(relayId: string | null): string {
+    if (!relayId) return "aucun (écriture locale)";
+    const r = relays.find((x) => x.id === relayId);
+    return r ? r.fc_vm_uri : relayId;
+  }
+
+  async function createJob(plan: PlanOut, planVmId: string) {
     setBusyKey(planVmId);
     setError(null);
     try {
-      const relayId = relays[0]?.id ?? null;
+      const relayId = chosenRelayId(plan, planVmId) || null;
       await api.createJob({ plan_vm_id: planVmId, relay_id: relayId });
       refresh();
     } catch (err) {
@@ -176,6 +193,12 @@ export default function MigrationPage() {
                   )}
                 </div>
 
+                {job && (
+                  <p className="muted" style={{ margin: "4px 0" }}>
+                    Relais : {relayLabel(job.relay_id)}
+                  </p>
+                )}
+
                 {!job && (
                   <p>
                     {!canCreate && (
@@ -184,7 +207,23 @@ export default function MigrationPage() {
                         plan) —{" "}
                       </span>
                     )}
-                    <button disabled={!canCreate || busyKey === vm.id} onClick={() => createJob(vm.id)}>
+                    <label style={{ marginRight: 8 }}>
+                      Relais :{" "}
+                      <select
+                        value={chosenRelayId(plan, vm.id)}
+                        onChange={(e) =>
+                          setRelayChoice((prev) => ({ ...prev, [vm.id]: e.target.value }))
+                        }
+                      >
+                        {relaysFor(plan).map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.fc_vm_uri} ({r.status})
+                          </option>
+                        ))}
+                        <option value="">aucun (écriture locale)</option>
+                      </select>
+                    </label>
+                    <button disabled={!canCreate || busyKey === vm.id} onClick={() => createJob(plan, vm.id)}>
                       {busyKey === vm.id ? "…" : "Créer un job"}
                     </button>
                   </p>

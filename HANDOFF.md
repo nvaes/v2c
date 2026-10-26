@@ -1570,3 +1570,14 @@ SCSI des volumes dans le relais) reste ouvert et se testera sur cette même
 VM une fois déployée.
 
 **Procédure d'installation écrite** dans `install/README.md`, nouvelle section « Déploiement complet sur une VM à l'intérieur du cluster FusionCompute (relais colocalisé) » : réseau (accès aux deux environnements, source et cible), Docker, transfert de fichiers (pas de dépôt git, copie directe), secrets, `CORS_ORIGINS` à corriger pour un accès distant, enregistrement du relais via appel API direct (pas encore de formulaire dans l'interface). Nicolas gère lui-même l'installation de l'OS ; cette VM hébergera l'application complète (API/web/Postgres/Redis) en plus du rôle Data Mover/relais, à sa demande explicite du 17/09/2026.
+
+## 19. Choix du relais à la création d'un job (26/10/2026)
+
+À la demande de Nicolas, la page Migration propose maintenant un menu
+« Relais » avant « Créer un job » : il liste les relais enregistrés sur
+l'endpoint FusionCompute cible du plan (premier proposé par défaut), plus
+« aucun (écriture locale) ». Avant, l'UI prenait silencieusement
+`relays[0]`, quel que soit son endpoint. Le relais assigné est affiché sur
+chaque job existant. Côté API, `POST /jobs` refuse désormais (400) un
+relais qui n'appartient pas à l'endpoint cible du plan. L'enregistrement
+d'un relais se fait toujours par `POST /relays` (pas de formulaire).

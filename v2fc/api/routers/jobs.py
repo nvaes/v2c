@@ -114,8 +114,15 @@ async def create_job(body: JobCreate, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="cette VM du plan n'a pas encore de datastore/réseau cible "
                                    "(PUT /plans/{id}/vms/{vm_id}/mapping)")
-    if body.relay_id is not None and await db.get(Relay, body.relay_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="relais introuvable")
+    if body.relay_id is not None:
+        relay = await db.get(Relay, body.relay_id)
+        if relay is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="relais introuvable")
+        # Le relais reçoit les volumes cibles en SCSI (§7.1) : il doit vivre
+        # sur le même endpoint FusionCompute que la cible du plan.
+        if relay.target_id != plan.target_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="ce relais n'appartient pas à l'endpoint FusionCompute cible du plan")
 
     job = Job(plan_id=plan.id, source_id=plan.source_id, target_id=plan.target_id,
              relay_id=body.relay_id, src_vm_moref=plan_vm.src_vm_moref,
