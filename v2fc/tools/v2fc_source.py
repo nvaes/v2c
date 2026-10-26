@@ -257,6 +257,12 @@ def cmd_sync(args, stats: dict | None = None) -> int:
 
         vm.enable_cbt()
 
+        # Un round interrompu peut avoir laissé son snapshot : il ferait
+        # grossir le delta VMDK de la source jusqu'à saturer le datastore.
+        if vm.cleanup_migration_snapshots():
+            log.warning("snapshot(s) de migration oublié(s) supprimé(s) sur %s",
+                        vm.name)
+
         round_no = state.data["round"] + 1
         snap_name = f"{SNAPSHOT_PREFIX}-r{round_no:04d}"
         snapshot = vm.create_snapshot(snap_name, quiesce=args.quiesce)
@@ -293,9 +299,15 @@ def cmd_sync(args, stats: dict | None = None) -> int:
                 plans = []
                 for disk in disks:
                     st = state.disk(disk.device_key)
-                    if st["capacity"] and not seed:
+                    # Reprise d'un seed : un disque déjà copié en entier n'a
+                    # besoin que des changements depuis sa copie.
+                    full = seed and not (st["change_id"] and st["rounds"])
+                    if st["capacity"] and not full:
                         vm.validate_cbt_continuity(disk, st["capacity"])
-                    base = FULL if seed else st["change_id"]
+                    if seed and not full:
+                        print(f"{disk.label} : copie initiale déjà faite, "
+                              f"rattrapage des changements seulement")
+                    base = FULL if full else st["change_id"]
                     if base is None:
                         sys.exit(f"{disk.label} : aucun changeId de référence, "
                                  f"lancer d'abord un cycle seed")
@@ -349,6 +361,7 @@ def cmd_sync(args, stats: dict | None = None) -> int:
                             st["cursor"] = chunk.idx + 1
                             progress.update(chunk.length)
                             round_progress.update(chunk.length)
+                            client.keepalive()
                         progress.finish()
                         dst.flush()          # AVANT d'écrire le changeId (§8.2)
                         totals["written"] += dst.stats.bytes_written

@@ -1822,3 +1822,23 @@ serveur ne l'avait jamais montré (base migrée au fil de l'eau). Correctif :
 Vérifié : installation neuve (schéma conforme, stamp 0008) puis redémarrage
 (chemin upgrade, rien à faire). Règle pour la suite : chaque nouvelle
 migration doit aussi être reflétée dans `api/models.py`.
+
+## 33. Rounds longs : session vCenter expirée (26/10/2026)
+
+Premières copies parallèles de plus de 30 min : la copie se terminait
+(`changeId enregistré` pour tous les disques) puis le round échouait sur
+`vim.fault.NotAuthenticated` dans le `finally` qui supprime le snapshot. La
+copie passe par VDDK, qui a sa propre connexion : la session pyVmomi reste
+inactive et vCenter la ferme (30 min par défaut). Effets : round compté en
+échec, snapshot `v2fc-r0001` laissé sur la source, et nouveau seed **complet**
+5 min plus tard (une heure de copie refaite pour une VM de 250 Gio — puis
+nouvel échec, en boucle).
+
+Correctifs :
+- `VSphereClient.keepalive()` : toutes les 5 min pendant la copie (et juste
+  avant la suppression du snapshot), lit `sessionManager.currentSession` et
+  se reconnecte (`Login`) si la session a expiré ;
+- début de round : purge des snapshots `v2fc-*` oubliés par un round
+  interrompu ;
+- reprise d'un seed : un disque dont le changeId a déjà été enregistré n'est
+  pas recopié, seuls ses changements depuis la copie le sont.

@@ -173,6 +173,8 @@ class VSphereClient:
     def __init__(self, host: str, user: str, password: str, port: int = 443,
                  verify: bool = True, thumbprint: str | None = None) -> None:
         self.host, self.port, self.user = host, port, user
+        self._password = password
+        self._last_seen = time.monotonic()
         self.thumbprint = thumbprint or fetch_thumbprint(host, port)
         if verify:
             ctx = None            # contexte système, vérification active
@@ -190,6 +192,23 @@ class VSphereClient:
         self.build = about.build
         log.info("connecté à %s — %s %s build %s", host, about.fullName,
                  about.version, about.build)
+
+    def keepalive(self, interval: float = 300.0) -> None:
+        """
+        Garde la session vCenter vivante pendant une longue copie.
+
+        La copie passe par VDDK, qui a sa propre connexion : la session
+        pyVmomi reste inactive et vCenter la ferme au bout de 30 min par
+        défaut. Le snapshot ne pouvait alors plus être supprimé en fin de
+        round (NotAuthenticated) et tout le round était compté en échec.
+        """
+        if time.monotonic() - self._last_seen < interval:
+            return
+        if self.content.sessionManager.currentSession is None:
+            log.warning("session vCenter expirée sur %s — reconnexion", self.host)
+            self.content.sessionManager.Login(userName=self.user,
+                                              password=self._password)
+        self._last_seen = time.monotonic()
 
     def close(self) -> None:
         if self.si:
@@ -636,6 +655,7 @@ class SourceVm:
     def remove_snapshot(self, snapshot, consolidate: bool = True) -> None:
         log.info("suppression du snapshot sur %s (consolidate=%s)",
                  self.name, consolidate)
+        self.client.keepalive(interval=0)
         task = snapshot.RemoveSnapshot_Task(removeChildren=False,
                                             consolidate=consolidate)
         self.client.wait_task(task, timeout=7200, label="RemoveSnapshot")
