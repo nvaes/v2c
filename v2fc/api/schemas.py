@@ -320,7 +320,8 @@ class JobOut(BaseModel):
     cbt_reseed_count: int
     delta_requested: bool = False
     delta_scheduled_at: datetime | None = None
-    delta_repeat_daily: bool = False
+    delta_daily_time: str | None = None
+    delta_timezone: str | None = None
     created_at: datetime
     disks: list[JobDiskOut] = Field(default_factory=list)
     rounds: list[SyncRoundOut] = Field(default_factory=list)
@@ -383,10 +384,10 @@ class DiskRoundReport(BaseModel):
 
 
 class JobDeltaSchedule(BaseModel):
-    # Date du prochain delta (avec fuseau, ex. venant du navigateur) ; null
-    # annule la planification.
-    at: datetime | None = None
-    repeat_daily: bool = False
+    # Heure du delta quotidien « HH:MM » dans `timezone` (fuseau IANA du
+    # navigateur) ; null annule la planification.
+    time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    timezone: str = "Europe/Brussels"
 
 
 class JobRoundProgress(BaseModel):

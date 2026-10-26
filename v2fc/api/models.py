@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import (JSON, BigInteger, CheckConstraint, ForeignKey, LargeBinary,
+from sqlalchemy import (JSON, BigInteger, CheckConstraint, ForeignKey, LargeBinary, String,
                         UniqueConstraint, func)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -179,10 +179,12 @@ class Job(Base):
     state_since: Mapped[datetime] = mapped_column(server_default=func.now())
     spec: Mapped[dict] = mapped_column(JSON, default=dict)
     cbt_reseed_count: Mapped[int] = mapped_column(default=0)
-    # Delta manuel / planifié (migration 0007) : plus de delta périodique.
+    # Delta manuel ou quotidien à heure fixe (migrations 0007-0008) : plus de
+    # delta périodique. delta_scheduled_at = prochaine occurrence, en UTC.
     delta_requested: Mapped[bool] = mapped_column(default=False, server_default="false")
     delta_scheduled_at: Mapped[datetime | None]
-    delta_repeat_daily: Mapped[bool] = mapped_column(default=False, server_default="false")
+    delta_daily_time: Mapped[str | None] = mapped_column(String(5))
+    delta_timezone: Mapped[str | None] = mapped_column(String(64))
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -323,18 +324,27 @@ async def get_run_context(job_id: uuid.UUID, round: str,
 # runner ne lance un delta que si `delta_requested` ou `delta_scheduled_at`
 # échu (api/routers/runner.py).
 # ---------------------------------------------------------------------------
+def _next_daily(time_hhmm: str, tz_name: str, after: datetime) -> datetime:
+    """Prochaine occurrence de « HH:MM » heure locale de `tz_name` strictement
+    après `after` (UTC sans fuseau), rendue en UTC sans fuseau. Calcul en
+    heure locale : un delta à 02:00 reste à 02:00 après un changement d'heure."""
+    tz = ZoneInfo(tz_name)
+    hour, minute = map(int, time_hhmm.split(":"))
+    local_after = after.replace(tzinfo=timezone.utc).astimezone(tz)
+    candidate = local_after.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    while candidate.astimezone(timezone.utc).replace(tzinfo=None) <= after:
+        candidate = (candidate + timedelta(days=1)).replace(hour=hour, minute=minute)
+    return candidate.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def _consume_delta_trigger(job: Job) -> None:
-    """Au démarrage d'un delta : la demande est servie ; une planification
-    quotidienne passe à la prochaine occurrence future, une ponctuelle
-    s'efface (si elle était échue — sinon elle reste pour plus tard)."""
+    """Au démarrage d'un delta : la demande manuelle est servie, et si
+    l'heure quotidienne était échue, la prochaine occurrence est calculée."""
     job.delta_requested = False
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    if job.delta_scheduled_at is not None and job.delta_scheduled_at <= now:
-        if job.delta_repeat_daily:
-            while job.delta_scheduled_at <= now:
-                job.delta_scheduled_at += timedelta(days=1)
-        else:
-            job.delta_scheduled_at = None
+    if job.delta_scheduled_at is not None and job.delta_scheduled_at <= now and job.delta_daily_time:
+        job.delta_scheduled_at = _next_daily(job.delta_daily_time,
+                                             job.delta_timezone or "UTC", now)
 
 
 @router.post("/{job_id}/delta", response_model=JobOut)
@@ -361,19 +371,23 @@ async def request_delta(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 async def set_delta_schedule(job_id: uuid.UUID, body: JobDeltaSchedule,
                              db: AsyncSession = Depends(get_db),
                              _user: User = Depends(require_role("operator"))) -> dict:
-    """Planifie le prochain delta (`at`, répétable chaque jour) ou l'annule (`at` null)."""
+    """Delta chaque jour à `time` (heure locale de `timezone`), ou annulation (`time` null)."""
     job = await db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job introuvable")
-    if body.at is None:
-        job.delta_scheduled_at, job.delta_repeat_daily = None, False
-        await _log(db, job.id, "planification des deltas annulée")
+    if body.time is None:
+        job.delta_daily_time = job.delta_timezone = job.delta_scheduled_at = None
+        await _log(db, job.id, "delta quotidien annulé")
     else:
-        at = body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc)
-        job.delta_scheduled_at = at.astimezone(timezone.utc).replace(tzinfo=None)
-        job.delta_repeat_daily = body.repeat_daily
-        await _log(db, job.id, f"delta planifié le {job.delta_scheduled_at:%d/%m/%Y %H:%M} UTC"
-                               + (", puis chaque jour à la même heure" if body.repeat_daily else ""))
+        try:
+            ZoneInfo(body.timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"fuseau horaire inconnu : {body.timezone}") from exc
+        job.delta_daily_time, job.delta_timezone = body.time, body.timezone
+        job.delta_scheduled_at = _next_daily(body.time, body.timezone,
+                                             datetime.now(timezone.utc).replace(tzinfo=None))
+        await _log(db, job.id, f"delta quotidien à {body.time} ({body.timezone})")
     await db.commit()
     return await _load_job_full(db, job.id)
 

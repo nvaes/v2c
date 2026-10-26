@@ -13,3 +13,4 @@ redis==5.2.1
 python-multipart==0.0.20
 pyvmomi>=8.0.3,<10  # même contrainte que v2fc/requirements.txt
 requests>=2.31,<3  # datamover.fusioncompute — client REST du VRM (§7.5)
+tzdata>=2024.1  # zoneinfo : heure quotidienne des deltas en heure locale (fuseau du navigateur)

@@ -1764,3 +1764,11 @@ démarrage du delta (`run-context`), la demande est consommée ; une
 planification quotidienne passe au lendemain même heure (heure UTC fixe :
 décalage d'une heure aux changements d'heure), une ponctuelle s'efface.
 Seed après provisioning et delta final de la bascule restent automatiques.
+
+**Simplifié le jour même (migration 0008)**, à la demande de Nicolas (« juste
+à quelle heure chaque jour ») : le planificateur ne prend plus qu'une heure
+`HH:MM`, delta chaque jour à cette heure. `delta_daily_time` + `delta_timezone`
+(fuseau IANA du navigateur) ; `delta_scheduled_at` = prochaine occurrence UTC
+calculée en heure locale (`_next_daily`), donc stable aux changements
+d'heure ; `delta_repeat_daily` supprimé. Ajout de `tzdata` aux dépendances
+de l'API.

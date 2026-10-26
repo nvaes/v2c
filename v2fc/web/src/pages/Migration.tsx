@@ -72,13 +72,6 @@ function utc(s: string): Date {
   return new Date(s + "Z");
 }
 
-// Valeur d'un <input type="datetime-local"> (heure locale du navigateur).
-function toLocalInput(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 function jobRunCommand(job: JobOut, kind: "seed" | "delta" | "final"): string {
   return (
     `V2FC_API_TOKEN=<jeton> docker run --rm --platform linux/amd64 \\\n` +
@@ -100,9 +93,8 @@ export default function MigrationPage() {
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [autoRestart, setAutoRestart] = useState<Record<string, boolean>>({});
-  // Planificateur de delta en cours de saisie, par job.
-  const [scheduleAt, setScheduleAt] = useState<Record<string, string>>({});
-  const [scheduleDaily, setScheduleDaily] = useState<Record<string, boolean>>({});
+  // Heure du delta quotidien en cours de saisie, par job.
+  const [scheduleTime, setScheduleTime] = useState<Record<string, string>>({});
   // Relais choisi par VM de plan avant création du job ("" = aucun relais,
   // écriture locale). Absent = premier relais de la cible du plan.
   const [relayChoice, setRelayChoice] = useState<Record<string, string>>({});
@@ -202,27 +194,15 @@ export default function MigrationPage() {
     }
   }
 
-  function clearScheduleDraft(jobId: string) {
-    const drop = <T,>(p: Record<string, T>) => {
-      const next = { ...p };
-      delete next[jobId];
-      return next;
-    };
-    setScheduleAt(drop);
-    setScheduleDaily(drop);
-  }
-
-  function saveSchedule(job: JobOut, at: string | null) {
+  function saveSchedule(job: JobOut, time: string | null) {
     runAction(job.id, async () => {
-      await api.setDeltaSchedule(job.id, at, at ? scheduleDaily[job.id] ?? job.delta_repeat_daily : false);
-      clearScheduleDraft(job.id);
+      await api.setDeltaSchedule(job.id, time);
+      setScheduleTime((p) => {
+        const next = { ...p };
+        delete next[job.id];
+        return next;
+      });
     });
-  }
-
-  // Valeur affichée : saisie en cours, sinon planification enregistrée.
-  function scheduleValue(job: JobOut): string {
-    return scheduleAt[job.id] ??
-      (job.delta_scheduled_at ? toLocalInput(utc(job.delta_scheduled_at)) : "");
   }
 
   async function retryFinalize(jobId: string) {
@@ -371,30 +351,20 @@ export default function MigrationPage() {
                       Lancer un delta maintenant
                     </button>
                     <span style={{ marginLeft: 16 }}>
-                      Planifier :{" "}
+                      Delta chaque jour à{" "}
                       <input
-                        type="datetime-local"
-                        value={scheduleValue(job)}
-                        onChange={(e) => setScheduleAt((p) => ({ ...p, [job.id]: e.target.value }))}
+                        type="time"
+                        value={scheduleTime[job.id] ?? job.delta_daily_time ?? ""}
+                        onChange={(e) => setScheduleTime((p) => ({ ...p, [job.id]: e.target.value }))}
                       />{" "}
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={scheduleDaily[job.id] ?? job.delta_repeat_daily}
-                          onChange={(e) => setScheduleDaily((p) => ({ ...p, [job.id]: e.target.checked }))}
-                        />{" "}
-                        chaque jour
-                      </label>{" "}
                       <button
                         className="secondary"
-                        disabled={busyKey === job.id || !scheduleValue(job) ||
-                          (scheduleAt[job.id] === undefined && scheduleDaily[job.id] === undefined)}
-                        // datetime-local = heure locale ; envoyée en ISO avec fuseau.
-                        onClick={() => saveSchedule(job, new Date(scheduleValue(job)).toISOString())}
+                        disabled={busyKey === job.id || !scheduleTime[job.id]}
+                        onClick={() => saveSchedule(job, scheduleTime[job.id])}
                       >
                         Planifier
                       </button>
-                      {job.delta_scheduled_at && (
+                      {job.delta_daily_time && (
                         <button
                           className="secondary"
                           style={{ marginLeft: 4 }}
@@ -408,7 +378,6 @@ export default function MigrationPage() {
                     {job.delta_scheduled_at && (
                       <p className="muted" style={{ margin: "4px 0 0" }}>
                         Prochain delta : {utc(job.delta_scheduled_at).toLocaleString()}
-                        {job.delta_repeat_daily ? " (puis chaque jour à la même heure)" : ""}
                       </p>
                     )}
                   </div>

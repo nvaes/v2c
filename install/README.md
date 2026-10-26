@@ -249,8 +249,8 @@ Migration). Le service `runner` (démarré par `start-webapp.sh` dès que le
 VDDK est présent) exécute alors tout seul le seed après le provisioning et
 le delta final après « Migrer maintenant ». Les deltas intermédiaires ne
 partent que sur demande, depuis l'onglet Migration : « Lancer un delta
-maintenant », ou planification à une date et heure (répétable chaque
-jour). Il écrit
+maintenant », ou un delta chaque jour à l'heure choisie (heure locale). Il
+écrit
 directement sur les volumes FusionCompute attachés à cette VM
 (`/dev/disk/by-id/virtio-<UUID du volume>`). Suivi :
 `docker compose logs -f runner` et l'onglet Logs.

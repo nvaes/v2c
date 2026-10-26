@@ -107,10 +107,11 @@ export const api = {
   rollbackJob: (id: string) => request<JobOut>(`/jobs/${id}/rollback`, { method: "POST" }),
   finalizeJob: (id: string) => request<JobOut>(`/jobs/${id}/finalize`, { method: "POST" }),
   requestDelta: (id: string) => request<JobOut>(`/jobs/${id}/delta`, { method: "POST" }),
-  // at : ISO avec fuseau (null = annuler la planification)
-  setDeltaSchedule: (id: string, at: string | null, repeatDaily: boolean) =>
+  // time « HH:MM » chaque jour, heure locale du navigateur (null = annuler)
+  setDeltaSchedule: (id: string, time: string | null) =>
     request<JobOut>(`/jobs/${id}/delta-schedule`, {
-      method: "PUT", body: JSON.stringify({ at, repeat_daily: repeatDaily }),
+      method: "PUT",
+      body: JSON.stringify({ time, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     }),
   getJobLogs: (id: string, since?: string) =>
     request<JobLogsOut>(`/jobs/${id}/logs${since ? `?since=${encodeURIComponent(since)}` : ""}`),
@@ -213,7 +214,8 @@ export interface JobOut {
   relay_id: string | null; src_vm_moref: string; src_vm_name: string;
   src_instance_uuid: string; tgt_vm_uri: string | null; state: JobState;
   state_since: string; spec: Record<string, unknown>; cbt_reseed_count: number;
-  delta_requested: boolean; delta_scheduled_at: string | null; delta_repeat_daily: boolean;
+  delta_requested: boolean; delta_scheduled_at: string | null;
+  delta_daily_time: string | null; delta_timezone: string | null;
   created_at: string; disks: JobDiskOut[]; rounds: SyncRoundOut[];
 }
 
