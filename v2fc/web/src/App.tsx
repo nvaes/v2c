@@ -11,6 +11,7 @@ import LogsPage, { LogsIndexPage } from "./pages/Logs";
 import UsersPage from "./pages/Users";
 import PasswordPage from "./pages/Password";
 import RunnerBadge from "./RunnerBadge";
+import PlanReportPage from "./pages/PlanReport";
 
 export default function App() {
   const [email, setEmail] = useState<string | null>(null);
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/endpoints/:id/inventory" element={<InventoryPage />} />
           <Route path="/plans" element={<PlansPage />} />
           <Route path="/plans/:id/target" element={<PlanTargetPage />} />
+          <Route path="/plans/:id/report" element={<PlanReportPage />} />
           <Route path="/migration" element={<MigrationPage />} />
           <Route path="/jobs/:id/logs" element={<LogsPage />} />
           <Route path="/logs" element={<LogsIndexPage />} />

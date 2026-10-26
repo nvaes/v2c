@@ -52,6 +52,7 @@ export const api = {
     }),
   listUsers: () => request<UserOut[]>("/users"),
   runnerStatus: () => request<RunnerStatus>("/runner/status"),
+  planReport: (id: string) => request<PlanReport>(`/plans/${id}/report`),
   createUser: (body: { email: string; password: string; role: Role }) =>
     request<UserOut>("/users", { method: "POST", body: JSON.stringify(body) }),
   updateUser: (id: string, body: { role?: Role; is_active?: boolean; password?: string }) =>
@@ -153,6 +154,26 @@ export interface InventoryProgress { phase: "idle" | "connecting" | "preflight" 
 export interface RunnerStatus {
   online: boolean; last_seen: string | null;
   running: { job_id: string; round: string }[]; relays: RelayOut[];
+}
+
+export interface PlanReport {
+  plan: { id: string; name: string; created_at: string; created_by: string | null };
+  source: { name: string; url: string } | null;
+  target: { name: string; url: string } | null;
+  generated_at: string; generated_by: string;
+  summary: { vms: number; migrated: number; in_progress: number; not_started: number };
+  vms: {
+    name: string; instance_uuid: string; datastore: string | null;
+    nics: { label: string; src_network: string; tgt_network_name: string | null; mac: string; keep_mac: boolean }[];
+    job: null | {
+      state: string; state_since: string; created_at: string; relay: string | null;
+      tgt_vm_uri: string | null; cbt_reseed_count: number; errors: number;
+      disks: { device_key: number; capacity_bytes: number; volume: string | null }[];
+      rounds: { no: number; kind: string; status: string; started_at: string;
+                ended_at: string | null; bytes: number | null }[];
+      events: { at: string; level: string; message: string }[];
+    };
+  }[];
 }
 
 export type Role = "viewer" | "operator" | "admin";

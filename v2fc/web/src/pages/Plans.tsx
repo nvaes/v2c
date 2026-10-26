@@ -113,6 +113,9 @@ export default function PlansPage() {
               <button onClick={() => navigate(`/plans/${plan.id}/target`)}>
                 {plan.target_id ? "Cible FusionCompute" : "Choisir une cible FusionCompute"}
               </button>
+              <button className="secondary" onClick={() => navigate(`/plans/${plan.id}/report`)}>
+                Rapport
+              </button>
               <button
                 className="secondary"
                 disabled={deletingId === plan.id}
