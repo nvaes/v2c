@@ -51,6 +51,7 @@ export const api = {
       method: "POST", body: JSON.stringify({ current_password, new_password }),
     }),
   listUsers: () => request<UserOut[]>("/users"),
+  runnerStatus: () => request<RunnerStatus>("/runner/status"),
   createUser: (body: { email: string; password: string; role: Role }) =>
     request<UserOut>("/users", { method: "POST", body: JSON.stringify(body) }),
   updateUser: (id: string, body: { role?: Role; is_active?: boolean; password?: string }) =>
@@ -148,6 +149,11 @@ export interface InventoryCluster { name: string; moref: string; hosts: string[]
 export interface InventoryDatacenter { name: string; moref: string; clusters: InventoryCluster[]; vms: InventoryVm[]; }
 export interface InventoryResponse { datacenters: InventoryDatacenter[]; vm_count: number; }
 export interface InventoryProgress { phase: "idle" | "connecting" | "preflight" | "done"; done: number; total: number; }
+
+export interface RunnerStatus {
+  online: boolean; last_seen: string | null;
+  running: { job_id: string; round: string }[]; relays: RelayOut[];
+}
 
 export type Role = "viewer" | "operator" | "admin";
 export interface UserOut {

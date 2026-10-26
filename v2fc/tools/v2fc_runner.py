@@ -79,6 +79,16 @@ def _register() -> bool:
     return True
 
 
+def _heartbeat(running: dict) -> None:
+    """Pouls pour l'interface (état du runner, rounds en cours) — best-effort."""
+    try:
+        requests.post(f"{API_URL}/api/v1/runner/heartbeat", timeout=10,
+                      json={"running": [{"job_id": j, "round": r} for j, (r, _) in running.items()]},
+                      headers={"Authorization": f"Bearer {TOKEN}"})
+    except requests.RequestException:
+        pass
+
+
 def _start_round(job_id: str, round_kind: str) -> subprocess.Popen:
     cred = _get(f"/api/v1/runner/jobs/{job_id}/source-credentials").json()
     env = {**os.environ, "V2FC_API_TOKEN": TOKEN,
@@ -115,6 +125,7 @@ def main() -> int:
                 del running[job_id]
                 finished_at[job_id] = time.monotonic()
 
+        _heartbeat(running)
         try:
             work = _get("/api/v1/runner/work").json()
         except requests.RequestException as exc:

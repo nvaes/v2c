@@ -384,6 +384,22 @@ class RunnerWorkItem(BaseModel):
     round: str
 
 
+class RunnerRound(BaseModel):
+    job_id: uuid.UUID
+    round: str
+
+
+class RunnerHeartbeat(BaseModel):
+    running: list[RunnerRound] = Field(default_factory=list)
+
+
+class RunnerStatus(BaseModel):
+    online: bool
+    last_seen: datetime | None
+    running: list[RunnerRound]
+    relays: list["RelayOut"]
+
+
 class RunnerRegister(BaseModel):
     # /sys/class/dmi/id/product_uuid de la machine du runner : FusionCompute
     # le présente comme `uuid` de la VM (constaté le 26/10/2026).

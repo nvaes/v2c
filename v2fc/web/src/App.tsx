@@ -10,6 +10,7 @@ import MigrationPage from "./pages/Migration";
 import LogsPage, { LogsIndexPage } from "./pages/Logs";
 import UsersPage from "./pages/Users";
 import PasswordPage from "./pages/Password";
+import RunnerBadge from "./RunnerBadge";
 
 export default function App() {
   const [email, setEmail] = useState<string | null>(null);
@@ -65,7 +66,10 @@ export default function App() {
             Utilisateurs
           </NavLink>
         )}
-        <span style={{ marginLeft: "auto" }} className="muted">
+        <span style={{ marginLeft: "auto" }}>
+          <RunnerBadge />
+        </span>
+        <span className="muted">
           <NavLink to="/password" style={{ color: "#cbd5e1" }}>{email}</NavLink>{" "}
           <button
             className="secondary"

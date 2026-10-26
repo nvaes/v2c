@@ -117,3 +117,16 @@ async def get_inventory_progress(endpoint_id) -> dict | None:
     """Lu par la route de poll (GET .../inventory/progress) — jamais par le scan lui-même."""
     raw = await get_redis().get(f"inventory_progress:{endpoint_id}")
     return json.loads(raw) if raw else None
+
+
+# --------------------------------------------------------------------------
+# Pouls du runner (26/10/2026) : envoyé à chaque tour de boucle (15 s), lu
+# par GET /runner/status pour afficher son état dans l'interface.
+# --------------------------------------------------------------------------
+async def set_runner_heartbeat(data: dict) -> None:
+    await get_redis().set("runner:heartbeat", json.dumps(data))
+
+
+async def get_runner_heartbeat() -> dict | None:
+    raw = await get_redis().get("runner:heartbeat")
+    return json.loads(raw) if raw else None

@@ -26,8 +26,10 @@ from starlette.concurrency import run_in_threadpool
 
 from ..db import get_db
 from ..models import Credential, Endpoint, Job, JobDisk, Relay, SyncRound, User
-from ..schemas import RelayOut, RunnerRegister, RunnerSourceCredentials, RunnerWorkItem
-from ..security import decrypt_credential_password, require_runner
+from ..cache import get_runner_heartbeat, set_runner_heartbeat
+from ..schemas import (RelayOut, RunnerHeartbeat, RunnerRegister, RunnerSourceCredentials,
+                       RunnerStatus, RunnerWorkItem)
+from ..security import decrypt_credential_password, require_role, require_runner
 from .jobs import _connection_args
 from datamover import fusioncompute as fc
 
@@ -36,6 +38,10 @@ router = APIRouter(prefix="/api/v1/runner", tags=["runner"])
 # Après un round en échec, attendre avant de relancer (incident réseau,
 # source injoignable...) plutôt que de boucler.
 _RETRY_AFTER = timedelta(minutes=5)
+
+# Au-delà, le runner est considéré hors ligne (il envoie son pouls toutes
+# les 15 s).
+_OFFLINE_AFTER = timedelta(seconds=60)
 
 _ROUND_FOR_STATE = {"SEEDING": "seed", "SYNCING": "delta", "FINAL_DELTA": "final"}
 
@@ -132,3 +138,33 @@ async def register_self(body: RunnerRegister, db: AsyncSession = Depends(get_db)
         await db.refresh(relay)
         return relay
     return None
+
+
+@router.post("/heartbeat", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def heartbeat(body: RunnerHeartbeat, _runner: User = Depends(require_runner)) -> None:
+    await set_runner_heartbeat({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "running": [{"job_id": str(r.job_id), "round": r.round} for r in body.running],
+    })
+
+
+@router.get("/status", response_model=RunnerStatus)
+async def runner_status(db: AsyncSession = Depends(get_db),
+                        _user: User = Depends(require_role("viewer"))) -> dict:
+    """
+    État du runner pour l'interface : en ligne si son dernier pouls date de
+    moins d'une minute. Hors ligne, les relais sont aussi marqués OFFLINE
+    (ils repassent ONLINE à son prochain enregistrement).
+    """
+    beat = await get_runner_heartbeat()
+    last_seen = datetime.fromisoformat(beat["at"]) if beat else None
+    online = last_seen is not None and datetime.now(timezone.utc) - last_seen < _OFFLINE_AFTER
+    relays = (await db.execute(select(Relay))).scalars().all()
+    if not online:
+        changed = [r for r in relays if r.status != "OFFLINE"]
+        for r in changed:
+            r.status = "OFFLINE"
+        if changed:
+            await db.commit()
+    return {"online": online, "last_seen": last_seen,
+            "running": beat["running"] if beat and online else [], "relays": relays}

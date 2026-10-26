@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   api, JobOut, PlanOut, PlanVmOut, RelayOut, SyncRoundOut,
 } from "../api";
+import { useRunnerStatus } from "../RunnerBadge";
 
 // États où un round s'exécute côté Data Mover (job-run, dans le terminal
 // de Nicolas — cette UI ne peut pas le lancer elle-même, cf. HANDOFF.md :
@@ -135,6 +136,7 @@ export default function MigrationPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const runner = useRunnerStatus();
   const [autoRestart, setAutoRestart] = useState<Record<string, boolean>>({});
   // Heure du delta quotidien en cours de saisie, par job.
   const [scheduleTime, setScheduleTime] = useState<Record<string, string>>({});
@@ -292,6 +294,14 @@ export default function MigrationPage() {
         </p>
       )}
 
+      {runner && !runner.online && (
+        <p className="error">
+          Le service runner est hors ligne
+          {runner.last_seen ? ` depuis ${new Date(runner.last_seen).toLocaleString()}` : ""} : aucune
+          copie (seed, delta, delta final) ne peut démarrer. Sur le serveur :{" "}
+          <code>docker compose up -d runner</code>, puis <code>docker compose logs runner</code>.
+        </p>
+      )}
       {error && <p className="error">{error}</p>}
       {loading && <p className="muted">Chargement…</p>}
 
