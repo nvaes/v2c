@@ -234,7 +234,8 @@ class DiskRound(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     round_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sync_rounds.id", ondelete="CASCADE"))
-    job_disk_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("job_disks.id"))
+    job_disk_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("job_disks.id", ondelete="CASCADE"))
     base_change_id: Mapped[str | None]
     next_change_id: Mapped[str | None]
     extent_count: Mapped[int | None]

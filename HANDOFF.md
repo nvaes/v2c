@@ -1743,3 +1743,10 @@ plan a des jobs, après une confirmation qui les énumère) :
 Testé sur un plan temporaire (suppression du plan et de ses VM). Non testé
 en réel : le refus sur job actif et la suppression des volumes (même appels
 FusionCompute que ceux vérifiés au §21 sur un volume de test).
+
+**Correctif le jour même (migration 0006)** : la suppression de PLAN1 par
+Nicolas renvoyait 500 — `disk_rounds.job_disk_id` n'était pas en
+`ON DELETE CASCADE` (seule clé de la chaîne jobs → … → extents dans ce cas),
+donc tout job ayant rapporté un round était insupprimable. Après correctif,
+PLAN1 supprimé avec son job CUTOVER_DONE : VM R00vSkypeEd (`i-0000000E`) et
+son volume 70 intacts sur FusionCompute, comme prévu.
