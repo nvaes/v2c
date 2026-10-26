@@ -514,6 +514,10 @@ class FusionComputeClient:
         return self._post(f"/sites/{self.site.id}/vms/{vm_id}/action/detachvol",
                           {"volUrn": vol_urn, "isFormat": False})
 
+    def get_datastore(self, ds_id: str) -> dict:
+        """`GET <ds_uri>/<id>` — `actualFreeSizeGB`, `freeSizeGB`, `name`..."""
+        return self._get(f"/sites/{self.site.id}/datastores/{_urn_tail(ds_id)}")
+
     def list_os_versions(self) -> dict:
         """`GET <vm_uri>/osversions` — {"windows": [...], "linux": [...], ...},
         chaque entrée `{id, versionDes, osType, osBit, ...}` (constaté sur le VRM

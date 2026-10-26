@@ -213,6 +213,18 @@ async def provision_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                                 detail=f"connexion FusionCompute impossible : {exc}") from exc
 
+    if fc_client is not None and plan_vm is not None:
+        try:
+            problem = await run_in_threadpool(_capacity_problem, fc_client, relay, plan_vm, disks)
+        except fc.FusionComputeError as exc:
+            problem = f"vérification de capacité impossible : {exc}"
+        if problem:
+            fc_client.close()
+            _set_state(job, "VALIDATING")
+            await _log(db, job.id, f"provisioning refusé : {problem}", "error")
+            await db.commit()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=problem)
+
     volume_errors: list[str] = []
     try:
         relay_vm_id = relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1] if relay else None
@@ -224,7 +236,7 @@ async def provision_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                 # Même règle de dimensionnement que le POC local validé le
                 # 17/09/2026 (relay/writer.py, §7.3 : capacité + secteur de
                 # signature, arrondi au granule) — pas une nouvelle formule.
-                quantity_gb = -(-VolumeWriter.required_volume_size(d["capacity_bytes"]) // (1024 ** 3))
+                quantity_gb = _volume_gb(d["capacity_bytes"])
                 try:
                     resp = await run_in_threadpool(
                         fc_client.create_and_attach_volume, relay_vm_id,
@@ -266,6 +278,41 @@ async def provision_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     await _log(db, job.id, "provisioning terminé — prêt pour le seed")
     await db.commit()
     return await _load_job_full(db, job.id)
+
+
+# Volumes virtio par VM sur FusionCompute (§7.4) : limite des disques
+# attachables au relais, disque système compris.
+_RELAY_VIRTIO_SLOTS = 25
+
+
+def _volume_gb(capacity_bytes: int) -> int:
+    """Taille du volume cible : capacité source + secteur de signature,
+    arrondie au Gio supérieur (même règle que le provisioning)."""
+    return -(-VolumeWriter.required_volume_size(capacity_bytes) // (1024 ** 3))
+
+
+def _capacity_problem(client: fc.FusionComputeClient, relay: Relay, plan_vm: PlanVm,
+                      disks: list[dict]) -> str | None:
+    """
+    Avant de créer le moindre volume (26/10/2026) : refuse si le datastore
+    cible n'a pas la place pour la taille provisionnée complète des disques
+    (volumes thin, mais un datastore plein en cours de copie est bien pire
+    qu'un refus clair), ou si le relais n'a plus assez d'emplacements virtio.
+    """
+    needed_gb = sum(_volume_gb(d["capacity_bytes"]) for d in disks)
+    ds = client.get_datastore(plan_vm.tgt_datastore_urn)
+    free_gb = ds.get("actualFreeSizeGB", ds.get("freeSizeGB"))
+    if free_gb is not None and needed_gb > free_gb:
+        return (f"espace insuffisant sur le datastore {ds.get('name', plan_vm.tgt_datastore_name)} : "
+                f"{needed_gb} Go nécessaires, {free_gb} Go libres — choisir un autre datastore "
+                f"dans la page Cible FusionCompute du plan")
+    relay_vm_id = relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1]
+    used = len(client.get_vm(relay_vm_id)["vmConfig"]["disks"])
+    if used + len(disks) > _RELAY_VIRTIO_SLOTS:
+        return (f"le relais porte déjà {used} disques sur {_RELAY_VIRTIO_SLOTS} possibles : "
+                f"pas de place pour les {len(disks)} disque(s) de cette VM — terminer ou "
+                f"supprimer d'autres migrations en cours d'abord")
+    return None
 
 
 # ---------------------------------------------------------------------------
