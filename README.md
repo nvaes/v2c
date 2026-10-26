@@ -5,6 +5,8 @@ des disques source par le VDDK (CBT, seed + delta), écriture aux offsets
 exacts côté cible, pause/reprise et contrôle d'intégrité, piloté par une
 interface web.
 
+**Utilisation : voir le [guide utilisateur](docs/GUIDE-UTILISATEUR.md).**
+
 Ce README couvre l'**installation**. La procédure détaillée et le
 dépannage sont dans [`install/README.md`](install/README.md), la conception
 dans [`ARCHITECTURE.md`](ARCHITECTURE.md) et l'historique/état du projet
