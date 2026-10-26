@@ -483,3 +483,20 @@ class TestAgentSansManagedBy:
         src = _bare(make_vm(name="ubuntu", guest="ubuntu64Guest"))
         assert src.agent_signal is None
         assert run_preflight(src).ok
+
+
+# --------------------------------------------------------------------------
+# Progression du round (job-run -> barre de progression, 26/10/2026)
+# --------------------------------------------------------------------------
+def test_round_progress_reports_start_resume_offset_and_end(monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    import v2fc_source
+    calls = []
+    clock = iter([0.0, 1.0, 10.0, 10.0, 12.0, 12.0])
+    monkeypatch.setattr(v2fc_source.time, "time", lambda: next(clock))
+
+    p = v2fc_source._RoundProgress(100, 40, lambda planned, done: calls.append((planned, done)))
+    p.update(10)      # < 5 s depuis le dernier envoi : rien
+    p.update(10)      # 10 s : envoi
+    p.update(40)      # fin du round : envoi immédiat
+    assert calls == [(100, 40), (100, 60), (100, 100)]

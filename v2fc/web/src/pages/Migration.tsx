@@ -36,6 +36,36 @@ function autoRoundStatus(job: JobOut): string {
   return "";
 }
 
+function formatDuration(s: number): string {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min`;
+}
+
+// Round en cours : avancement rapporté par job-run toutes les 5 s.
+function RoundProgress({ job }: { job: JobOut }) {
+  const round = job.rounds[job.rounds.length - 1];
+  if (!round || round.status !== "running") return null;
+  const planned = round.bytes_planned ?? 0;
+  const done = round.bytes_transferred ?? 0;
+  if (planned <= 0) {
+    return <p className="muted">round {round.kind} : analyse des disques…</p>;
+  }
+  const pct = Math.min(100, (100 * done) / planned);
+  const elapsed = (Date.now() - new Date(round.started_at + "Z").getTime()) / 1000;
+  const rate = elapsed > 0 ? done / elapsed : 0;
+  const eta = rate > 0 ? (planned - done) / rate : 0;
+  const gib = (b: number) => (b / 2 ** 30).toFixed(1);
+  return (
+    <div>
+      <div className="progress"><div style={{ width: `${pct}%` }} /></div>
+      <p className="muted" style={{ margin: 0 }}>
+        round {round.kind} : {pct.toFixed(1)} % — {gib(done)} / {gib(planned)} Gio
+        {rate > 0 && <> — {(rate / 2 ** 20).toFixed(0)} Mio/s — reste ~{formatDuration(eta)}</>}
+      </p>
+    </div>
+  );
+}
+
 function jobRunCommand(job: JobOut, kind: "seed" | "delta" | "final"): string {
   return (
     `V2FC_API_TOKEN=<jeton> docker run --rm --platform linux/amd64 \\\n` +
@@ -253,6 +283,8 @@ export default function MigrationPage() {
                 {job && job.relay_id && autoRoundStatus(job) && (
                   <p className="muted">{autoRoundStatus(job)}</p>
                 )}
+
+                {job && <RoundProgress job={job} />}
 
                 {job && !job.relay_id && ROUND_KIND_FOR_STATE[job.state] && (
                   <div>

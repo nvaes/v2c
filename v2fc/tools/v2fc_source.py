@@ -133,6 +133,31 @@ def cmd_preflight(args) -> int:
     return 0 if report.ok else 1
 
 
+class _RoundProgress:
+    """
+    Avancement du round entier (tous disques), transmis à `callback(planned,
+    done)` au plus toutes les `interval` secondes — barre de progression de
+    la page Migration (job-run). Sans callback (CLI manuelle) : rien.
+    """
+
+    def __init__(self, planned: int, done: int, callback=None,
+                interval: float = 5.0) -> None:
+        self.planned, self.done = planned, done
+        self.callback, self.interval = callback, interval
+        self._last = 0.0
+        self._emit()
+
+    def update(self, n_bytes: int) -> None:
+        self.done += n_bytes
+        if time.time() - self._last >= self.interval or self.done >= self.planned:
+            self._emit()
+
+    def _emit(self) -> None:
+        self._last = time.time()
+        if self.callback is not None:
+            self.callback(self.planned, self.done)
+
+
 class _Progress:
     """
     Ligne de progression pendant le transfert d'un disque, réaffichée sur
@@ -265,6 +290,7 @@ def cmd_sync(args, stats: dict | None = None) -> int:
                 # toute façon aucun sens pour NBD/NBDSSL/SAN.
                 conn.prepare_access("v2fc")
             try:
+                plans = []
                 for disk in disks:
                     st = state.disk(disk.device_key)
                     if st["capacity"] and not seed:
@@ -283,7 +309,16 @@ def cmd_sync(args, stats: dict | None = None) -> int:
                     print(f"  {len(changed)} zone(s) -> {len(plan)} tranche(s), "
                           f"{planned / 2**20:,.0f} Mio "
                           f"({100 * planned / disk.capacity_bytes:.2f} %)")
+                    plans.append((disk, st, plan))
 
+                # Tous les plans sont calculés avant la copie : le total du
+                # round est connu dès le départ pour la barre de progression.
+                remaining = sum(ex.total_bytes(ex.resume_from(p, s["cursor"] or 0))
+                                for _, s, p in plans)
+                round_progress = _RoundProgress(totals["planned"],
+                                                totals["planned"] - remaining,
+                                                getattr(args, "progress_cb", None))
+                for disk, st, plan in plans:
                     if volumes:
                         if disk.device_key not in volumes:
                             sys.exit(f"{disk.label} : aucun volume cible provisionné "
@@ -313,6 +348,7 @@ def cmd_sync(args, stats: dict | None = None) -> int:
                                             expected_crc=checksum(data))
                             st["cursor"] = chunk.idx + 1
                             progress.update(chunk.length)
+                            round_progress.update(chunk.length)
                         progress.finish()
                         dst.flush()          # AVANT d'écrire le changeId (§8.2)
                         totals["written"] += dst.stats.bytes_written
@@ -412,6 +448,17 @@ class _ApiLogHandler(logging.Handler):
             pass
 
 
+def _report_progress(api_url: str, job_id: str, round_id: str, headers: dict,
+                     planned: int, done: int) -> None:
+    """Best-effort, comme les logs : ne jamais interrompre le round pour ça."""
+    try:
+        requests.post(f"{api_url}/api/v1/jobs/{job_id}/rounds/{round_id}/progress",
+                      json={"bytes_planned": planned, "bytes_done": done},
+                      headers=headers, timeout=5)
+    except requests.RequestException:
+        pass
+
+
 def _prepare_relay_volumes(volumes: dict, wait_s: float = 60.0) -> None:
     """
     Avant un seed : attend que chaque volume attaché au relais apparaisse
@@ -470,7 +517,9 @@ def cmd_job_run(args) -> int:
         target_dir=str(target_dir), state=str(state_path),
         chunk=args.chunk, transport=args.transport, require=args.require,
         quiesce=args.quiesce or ctx["round_kind"] == "FINAL",
-        volumes=volumes or None)
+        volumes=volumes or None,
+        progress_cb=lambda planned, done: _report_progress(
+            api_url, args.job_id, ctx["round_id"], headers, planned, done))
 
     stats: dict = {}
     status_, error_msg, rc = "failed", None, 1
@@ -509,6 +558,7 @@ def cmd_job_run(args) -> int:
         print(f"AVERTISSEMENT : rapport de round refusé par l'API "
               f"({patch_resp.status_code}) — le round a bien tourné localement, "
               f"seule la mise à jour du job a échoué : {patch_resp.text}", file=sys.stderr)
+        return rc or 3
 
     return rc
 

@@ -23,3 +23,6 @@ input, select { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 4px;
 .log-warning { color: #92400e; }
 .error { color: #991b1b; background: #fee2e2; padding: 8px 12px; border-radius: 4px; }
 .muted { color: #6b7280; font-size: 0.85rem; }
+/* barre de progression d'un round (page Migration, 26/10/2026) */
+.progress { height: 10px; background: #e5e7eb; border-radius: 5px; overflow: hidden; margin: 6px 0 4px; }
+.progress > div { height: 100%; background: #14213d; transition: width 0.5s; }

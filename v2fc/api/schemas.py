@@ -347,6 +347,11 @@ class DiskRoundReport(BaseModel):
     bytes_transferred: int | None = None
 
 
+class JobRoundProgress(BaseModel):
+    bytes_planned: int = Field(ge=0)
+    bytes_done: int = Field(ge=0)
+
+
 class JobRoundReport(BaseModel):
     status: str = Field(pattern="^(success|failed|cbt_invalidated)$")
     duration_s: float | None = None

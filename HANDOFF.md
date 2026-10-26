@@ -1628,3 +1628,22 @@ VM relais `i-0000000D` (= `dc1-migration`).
 - **Non testé** : un seed réel bout en bout (snapshot + VDDK nbdssl depuis
   cette VM vers les ESXi source, port 902) ; `_finalize` (création de la VM
   cible) ; la signature n'est pas effacée avant la bascule.
+
+## 22. Premier seed réel bout en bout + barre de progression (26/10/2026)
+
+**Seed réel réussi** : R00vSkypeEd (PLAN1), 100 Gio provisionnés, 44,7 Gio
+copiés en ~10 min à 69-73 Mio/s (nbdssl depuis `dc1-migration`, écriture
+sur le volume FusionCompute 70 via le relais). Job en SYNCED.
+
+**Bug corrigé** : `PATCH /jobs/{id}/rounds/{rid}` créait des `DiskRound`
+sans `status` (colonne NOT NULL) → 500 ; le job restait en SEEDING et le
+runner a relancé le seed 4 fois (chaque passage complet et correct). Corrigé
+(`status=body.status`). Garde-fous : `job-run` sort en erreur si l'API
+refuse le rapport, et le runner attend `V2FC_RUNNER_COOLDOWN_S` (300 s) avant
+de relancer un round du même job.
+
+**Barre de progression** (demande de Nicolas) : `cmd_sync` calcule les plans
+de tous les disques avant la copie (total du round connu d'emblée) ;
+`job-run` envoie `POST /jobs/{id}/rounds/{rid}/progress` toutes les 5 s
+(`bytes_planned`, `bytes_done`, stockés dans `sync_rounds` tant que le round
+tourne). La page Migration affiche barre, %, Gio, débit et temps restant.

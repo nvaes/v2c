@@ -39,7 +39,8 @@ from ..db import get_db
 from ..models import (Credential, DiskRound, Endpoint, Job, JobDisk, JobLogEntry,
                       Plan, PlanVm, Relay, SyncRound, User)
 from ..schemas import (JobCreate, JobCutoverRequest, JobLogsIn, JobLogsOut,
-                       JobOut, JobRoundReport, JobRoundStart, JobRunContext)
+                       JobOut, JobRoundProgress, JobRoundReport, JobRoundStart,
+                       JobRunContext)
 from ..security import decrypt_credential_password, require_role
 from datamover import fusioncompute as fc
 from datamover.vsphere import VSphereClient, VSphereError
@@ -317,6 +318,27 @@ async def get_run_context(job_id: uuid.UUID, round: str,
 
 
 # ---------------------------------------------------------------------------
+# Avancement d'un round en cours (job-run, toutes les 5 s) — barre de
+# progression de la page Migration. Pendant le round, bytes_transferred
+# porte les octets parcourus ; le rapport de fin le remplace par les octets
+# réellement écrits.
+# ---------------------------------------------------------------------------
+@router.post("/{job_id}/rounds/{round_id}/progress", status_code=status.HTTP_204_NO_CONTENT,
+             response_model=None)
+async def report_round_progress(job_id: uuid.UUID, round_id: uuid.UUID, body: JobRoundProgress,
+                                db: AsyncSession = Depends(get_db),
+                                _user: User = Depends(require_role("operator"))) -> None:
+    round_row = await db.get(SyncRound, round_id)
+    if round_row is None or round_row.job_id != job_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="round introuvable")
+    if round_row.status != "running":
+        return
+    round_row.bytes_planned = body.bytes_planned
+    round_row.bytes_transferred = body.bytes_done
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
 # Rapport de fin de round (appelé par `job-run` après cmd_sync)
 # ---------------------------------------------------------------------------
 @router.patch("/{job_id}/rounds/{round_id}", response_model=JobOut)
@@ -354,7 +376,8 @@ async def report_round(job_id: uuid.UUID, round_id: uuid.UUID, body: JobRoundRep
                 round_id=round_row.id, job_disk_id=job_disk.id,
                 base_change_id=prev.next_change_id if prev else None,
                 next_change_id=d.next_change_id,
-                bytes_transferred=d.bytes_transferred))
+                bytes_transferred=d.bytes_transferred,
+                status=body.status))
 
     if body.status == "cbt_invalidated":
         job.cbt_reseed_count += 1
