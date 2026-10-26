@@ -1772,3 +1772,11 @@ Seed après provisioning et delta final de la bascule restent automatiques.
 calculée en heure locale (`_next_daily`), donc stable aux changements
 d'heure ; `delta_repeat_daily` supprimé. Ajout de `tzdata` aux dépendances
 de l'API.
+
+## 29. Dernière synchronisation et historique des rounds (26/10/2026)
+
+Nicolas ne voyait pas quand le dernier delta avait eu lieu. Page Migration,
+sous chaque job : « Dernière synchronisation : delta n°2 — terminé le … —
+7 s — 47 Mio écrits — réussi », et un historique dépliable de tous les
+rounds (type, fin, durée, volume écrit, statut). Uniquement de l'affichage :
+les données (`sync_rounds`) étaient déjà renvoyées par l'API.

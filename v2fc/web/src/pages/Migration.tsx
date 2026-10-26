@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  api, JobOut, PlanOut, PlanVmOut, RelayOut,
+  api, JobOut, PlanOut, PlanVmOut, RelayOut, SyncRoundOut,
 } from "../api";
 
 // États où un round s'exécute côté Data Mover (job-run, dans le terminal
@@ -70,6 +70,49 @@ function RoundProgress({ job }: { job: JobOut }) {
 // Horodatages de l'API : UTC sans fuseau.
 function utc(s: string): Date {
   return new Date(s + "Z");
+}
+
+const ROUND_KIND_LABELS: Record<string, string> = {
+  SEED: "seed", DELTA: "delta", FINAL: "delta final",
+};
+const ROUND_STATUS_LABELS: Record<string, string> = {
+  success: "réussi", failed: "échec", cbt_invalidated: "CBT invalidé — nouveau seed",
+  running: "en cours",
+};
+
+function roundSummary(r: SyncRoundOut): string {
+  const end = r.ended_at ? utc(r.ended_at) : null;
+  const duration = end ? (end.getTime() - utc(r.started_at).getTime()) / 1000 : 0;
+  const size = r.bytes_transferred != null
+    ? `${(r.bytes_transferred / 2 ** 20).toLocaleString(undefined, { maximumFractionDigits: 0 })} Mio écrits`
+    : "";
+  return [
+    `${ROUND_KIND_LABELS[r.kind] ?? r.kind} n°${r.round_no}`,
+    end ? `terminé le ${end.toLocaleString()}` : `démarré le ${utc(r.started_at).toLocaleString()}`,
+    end ? (duration >= 60 ? formatDuration(duration) : `${Math.round(duration)} s`) : "",
+    size,
+    ROUND_STATUS_LABELS[r.status] ?? r.status,
+  ].filter(Boolean).join(" — ");
+}
+
+// Dernière synchronisation terminée + historique complet des rounds du job.
+function RoundHistory({ job }: { job: JobOut }) {
+  const done = job.rounds.filter((r) => r.status !== "running");
+  if (done.length === 0) return null;
+  const last = done[done.length - 1];
+  return (
+    <div className="muted" style={{ margin: "4px 0" }}>
+      Dernière synchronisation : {roundSummary(last)}
+      {job.rounds.length > 1 && (
+        <details>
+          <summary>historique ({job.rounds.length} rounds)</summary>
+          <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
+            {[...job.rounds].reverse().map((r) => <li key={r.id}>{roundSummary(r)}</li>)}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
 }
 
 function jobRunCommand(job: JobOut, kind: "seed" | "delta" | "final"): string {
@@ -329,6 +372,7 @@ export default function MigrationPage() {
                 )}
 
                 {job && <RoundProgress job={job} />}
+                {job && <RoundHistory job={job} />}
 
                 {job && !job.relay_id && ROUND_KIND_FOR_STATE[job.state] && (
                   <div>
