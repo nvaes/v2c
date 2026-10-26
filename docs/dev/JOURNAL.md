@@ -1781,3 +1781,18 @@ sous chaque job : « Dernière synchronisation : delta n°2 — terminé le … 
 7 s — 47 Mio écrits — réussi », et un historique dépliable de tous les
 rounds (type, fin, durée, volume écrit, statut). Uniquement de l'affichage :
 les données (`sync_rounds`) étaient déjà renvoyées par l'API.
+
+## 30. Installation de Docker selon la distribution (26/10/2026)
+
+`install/install-docker.sh` (root) : Docker Engine + plugins compose/buildx
+depuis le dépôt officiel Docker — apt pour Ubuntu/Debian et dérivées (nom de
+code Ubuntu pour les dérivées d'Ubuntu), fichier `.repo` posé directement
+pour RHEL/AlmaLinux/Rocky/Oracle Linux/CentOS Stream/Fedora (compatible dnf 4,
+dnf 5 et yum ; `--allowerasing` pour podman/runc de RHEL 8/9), paquets de la
+distribution pour SLES/openSUSE. Sans effet si Docker et compose v2 sont déjà
+présents ; active le service, ajoute l'utilisateur de `sudo` au groupe
+docker, prévient hors x86-64. Testé en conteneurs vierges : Ubuntu 24.04,
+Debian 12, Rocky Linux 9, AlmaLinux 8, Fedora 41 (installation complète,
+démarrage du service sauté faute de systemd) ; et sur le serveur relais
+(déjà installé : rien de réinstallé). Non testé : SLES/openSUSE.
+`check-prereqs.sh` renvoie vers ce script sous Linux.

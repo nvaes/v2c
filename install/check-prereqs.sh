@@ -23,20 +23,29 @@ else
   bad "v2fc/docker-compose.yml introuvable — ce script doit rester dans install/ à côté de v2fc/"
 fi
 
+# Linux : install/install-docker.sh installe Docker ; macOS : Docker Desktop.
+if [ "$(uname -s)" = "Linux" ]; then
+  INSTALL_HINT="lancer : sudo ./install/install-docker.sh"
+  START_HINT="démarrer le service : sudo systemctl enable --now docker"
+else
+  INSTALL_HINT="installer Docker Desktop"
+  START_HINT="Docker Desktop n'est probablement pas démarré"
+fi
+
 if command -v docker >/dev/null 2>&1; then
   if docker info >/dev/null 2>&1; then
-    pass "Docker Desktop lancé et accessible"
+    pass "Docker lancé et accessible ($(docker --version 2>/dev/null))"
   else
-    bad "Docker installé mais injoignable — Docker Desktop n'est probablement pas démarré"
+    bad "Docker installé mais injoignable — $START_HINT (ou droits : groupe docker / sudo)"
   fi
 else
-  bad "commande 'docker' introuvable — installer Docker Desktop"
+  bad "commande 'docker' introuvable — $INSTALL_HINT"
 fi
 
 if docker compose version >/dev/null 2>&1; then
   pass "docker compose (plugin v2) disponible"
 else
-  bad "docker compose indisponible — nécessaire pour la stack web (docs/dev/JOURNAL.md §11)"
+  bad "docker compose indisponible — $INSTALL_HINT"
 fi
 
 if [ -f "$V2FC/.env" ]; then

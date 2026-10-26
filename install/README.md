@@ -39,7 +39,17 @@ modifier :
 ./install/check-prereqs.sh
 ```
 
-- Docker Desktop installé et lancé (les deux composants en dépendent).
+- Docker Engine et le plugin `docker compose` v2, installés et lancés (les
+  deux composants en dépendent). **Sur Linux**, le script les installe
+  selon la distribution, depuis le dépôt officiel Docker :
+
+  ```bash
+  sudo ./install/install-docker.sh
+  ```
+
+  Pris en charge : Ubuntu, Debian et dérivées ; RHEL, AlmaLinux, Rocky
+  Linux, Oracle Linux, CentOS Stream ; Fedora ; SLES/openSUSE (paquets de la
+  distribution). Sans effet si Docker est déjà là. Sur macOS : Docker Desktop.
 - Pour le Data Mover uniquement : la distribution VDDK décompressée
   (`vmware-vix-disklib-distrib/`) à la racine du projet, à côté de `v2fc/`.
   Sur Apple Silicon, aucune installation native possible : tout passe par
@@ -130,15 +140,18 @@ via VPN, ou via un reverse proxy, selon ce que permet le réseau du cluster.
 
 ### 2. Docker
 
-Ubuntu ne fournit pas Docker par défaut. Dépôt officiel Docker (recommandé
-plutôt que le paquet `docker.io` d'Ubuntu, pour avoir le plugin
-`docker compose` v2) :
+Après avoir copié le projet (étape 3), une seule commande, quelle que soit
+la distribution prise en charge (voir §Prérequis) :
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker "$USER"   # puis se reconnecter (ou `newgrp docker`)
-docker compose version            # doit afficher la v2
+sudo ./install/install-docker.sh  # dépôt officiel Docker, service activé au démarrage
+docker compose version            # doit afficher la v2 (se reconnecter si « permission denied »)
 ```
+
+Le script retire les paquets qui entrent en conflit (`docker.io`,
+`podman-docker`, podman/runc de RHEL 8/9), ajoute l'utilisateur ayant lancé
+`sudo` au groupe `docker`, et prévient si l'architecture n'est pas x86-64
+(le VDDK n'existe qu'en x86-64).
 
 ### 3. Copier le projet sur la VM
 
@@ -258,6 +271,7 @@ directement sur les volumes FusionCompute attachés à cette VM
 ## Contenu de ce dossier
 
 ```
+install-docker.sh    installe Docker + compose selon la distribution Linux
 check-prereqs.sh     diagnostic (Docker, VDDK, .env) — ne modifie rien
 setup-env.sh         crée v2fc/.env et génère les secrets
 start-webapp.sh       build + démarre le socle web

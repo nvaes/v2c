@@ -28,6 +28,7 @@ maintenance) dans [`docs/dev/JOURNAL.md`](docs/dev/JOURNAL.md).
 │   ├── GUIDE-UTILISATEUR.md guide d'utilisation
 │   └── dev/JOURNAL.md       historique technique, constats sur VMware/FusionCompute réels
 ├── install/             scripts d'installation + README détaillé
+│   ├── install-docker.sh    installe Docker + compose (Linux, selon la distribution)
 │   ├── check-prereqs.sh     diagnostic, ne modifie rien
 │   ├── setup-env.sh         crée v2fc/.env et génère les secrets
 │   ├── start-webapp.sh      build + démarrage du socle web
@@ -58,7 +59,8 @@ maintenance) dans [`docs/dev/JOURNAL.md`](docs/dev/JOURNAL.md).
 ## Prérequis
 
 - **Docker** avec le plugin `docker compose` v2 (Docker Desktop sur Mac,
-  Docker Engine sur Linux : `curl -fsSL https://get.docker.com | sudo sh`).
+  Docker Engine sur Linux : `sudo ./install/install-docker.sh`, qui l'installe
+  selon la distribution).
 - **Python 3** sur l'hôte (utilisé par `setup-env.sh` pour générer les
   secrets).
 - **Pour le Data Mover uniquement** : la distribution VDDK Linux x86-64.
@@ -71,6 +73,10 @@ maintenance) dans [`docs/dev/JOURNAL.md`](docs/dev/JOURNAL.md).
 ```bash
 git clone git@github.com:nvaes/v2c.git v2fc-deploy
 cd v2fc-deploy
+
+# 0. Docker Engine + docker compose, selon la distribution Linux
+#    (sans effet s'ils sont déjà installés)
+sudo ./install/install-docker.sh
 
 # 1. Diagnostic (ne modifie rien)
 ./install/check-prereqs.sh
