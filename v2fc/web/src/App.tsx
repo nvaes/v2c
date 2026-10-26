@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { api, getToken, setToken } from "./api";
+import { api, getToken, Role, setToken } from "./api";
 import Login from "./pages/Login";
 import EndpointsPage from "./pages/Endpoints";
 import InventoryPage from "./pages/Inventory";
@@ -8,9 +8,12 @@ import PlansPage from "./pages/Plans";
 import PlanTargetPage from "./pages/PlanTarget";
 import MigrationPage from "./pages/Migration";
 import LogsPage, { LogsIndexPage } from "./pages/Logs";
+import UsersPage from "./pages/Users";
+import PasswordPage from "./pages/Password";
 
 export default function App() {
   const [email, setEmail] = useState<string | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -20,7 +23,10 @@ export default function App() {
     }
     api
       .me()
-      .then((u) => setEmail(u.email))
+      .then((u) => {
+        setEmail(u.email);
+        setRole(u.role);
+      })
       .catch(() => setToken(null))
       .finally(() => setChecked(true));
   }, []);
@@ -28,7 +34,14 @@ export default function App() {
   if (!checked) return null;
 
   if (!email) {
-    return <Login onLoggedIn={(e) => setEmail(e)} />;
+    return (
+      <Login
+        onLoggedIn={(e) => {
+          setEmail(e);
+          api.me().then((u) => setRole(u.role)).catch(() => setRole(null));
+        }}
+      />
+    );
   }
 
   return (
@@ -47,13 +60,19 @@ export default function App() {
         <NavLink to="/logs" className={({ isActive }) => (isActive ? "active" : "")}>
           Logs
         </NavLink>
+        {role === "admin" && (
+          <NavLink to="/users" className={({ isActive }) => (isActive ? "active" : "")}>
+            Utilisateurs
+          </NavLink>
+        )}
         <span style={{ marginLeft: "auto" }} className="muted">
-          {email}{" "}
+          <NavLink to="/password" style={{ color: "#cbd5e1" }}>{email}</NavLink>{" "}
           <button
             className="secondary"
             onClick={() => {
               setToken(null);
               setEmail(null);
+              setRole(null);
             }}
           >
             Se déconnecter
@@ -70,6 +89,8 @@ export default function App() {
           <Route path="/migration" element={<MigrationPage />} />
           <Route path="/jobs/:id/logs" element={<LogsPage />} />
           <Route path="/logs" element={<LogsIndexPage />} />
+          <Route path="/users" element={<UsersPage currentEmail={email} />} />
+          <Route path="/password" element={<PasswordPage />} />
         </Routes>
       </main>
     </>

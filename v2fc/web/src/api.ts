@@ -45,7 +45,16 @@ export const api = {
     });
     return data.access_token;
   },
-  me: () => request<{ email: string; role: string }>("/auth/me"),
+  me: () => request<UserOut>("/auth/me"),
+  changeOwnPassword: (current_password: string, new_password: string) =>
+    request<void>("/auth/password", {
+      method: "POST", body: JSON.stringify({ current_password, new_password }),
+    }),
+  listUsers: () => request<UserOut[]>("/users"),
+  createUser: (body: { email: string; password: string; role: Role }) =>
+    request<UserOut>("/users", { method: "POST", body: JSON.stringify(body) }),
+  updateUser: (id: string, body: { role?: Role; is_active?: boolean; password?: string }) =>
+    request<UserOut>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   listEndpoints: () => request<EndpointOut[]>("/endpoints"),
   createEndpoint: (body: EndpointCreate) =>
@@ -139,6 +148,11 @@ export interface InventoryCluster { name: string; moref: string; hosts: string[]
 export interface InventoryDatacenter { name: string; moref: string; clusters: InventoryCluster[]; vms: InventoryVm[]; }
 export interface InventoryResponse { datacenters: InventoryDatacenter[]; vm_count: number; }
 export interface InventoryProgress { phase: "idle" | "connecting" | "preflight" | "done"; done: number; total: number; }
+
+export type Role = "viewer" | "operator" | "admin";
+export interface UserOut {
+  id: string; email: string; role: Role; is_active: boolean; created_at: string | null;
+}
 
 export interface PlanVmIn { moref: string; instance_uuid: string; name: string; }
 export interface PlanCreate { name: string; source_id: string; target_id?: string | null; vms: PlanVmIn[]; }

@@ -26,6 +26,29 @@ class UserOut(BaseModel):
     email: str
     role: str
     is_active: bool
+    created_at: datetime | None = None
+
+
+# Gestion des utilisateurs (admin) — 26/10/2026. Mots de passe : 10 caractères
+# au moins, jamais renvoyés.
+_ROLE = "^(viewer|operator|admin)$"
+
+
+class UserCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=10, max_length=256)
+    role: str = Field(default="operator", pattern=_ROLE)
+
+
+class UserUpdate(BaseModel):
+    role: str | None = Field(default=None, pattern=_ROLE)
+    is_active: bool | None = None
+    password: str | None = Field(default=None, min_length=10, max_length=256)
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=10, max_length=256)
 
 
 # --------------------------------------------------------------------------

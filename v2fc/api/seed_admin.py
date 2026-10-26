@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Crée le premier compte administrateur. Il n'existe pas encore de parcours
-d'inscription — ce script est la seule façon d'amorcer les comptes.
+Crée le premier compte administrateur, à l'installation. Les comptes
+suivants se gèrent dans l'interface (page Utilisateurs, rôle admin).
 
 Usage :
     docker compose exec api python3 -m api.seed_admin --email a@b.c
