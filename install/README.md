@@ -122,8 +122,7 @@ qu'un à la fois) :
 
 - le vCenter/ESXi **source** (VDDK — NBD/NBDSSL/hotadd selon le transport
   choisi, voir `v2fc/README.md` et ARCHITECTURE.md §6.4) ;
-- le VRM FusionCompute **cible** (API REST, port à confirmer — 7443 ou
-  8443, D2 toujours ouvert — ARCHITECTURE.md §7.5).
+- le VRM FusionCompute **cible** (API REST, port 7443 — ARCHITECTURE.md §7.5).
 
 Et, en entrée, un accès pour toi depuis ton poste habituel vers cette VM,
 au minimum les ports 8000 (API) et 5173 (interface web) — directement,
@@ -184,6 +183,7 @@ connexion échouera silencieusement. Éditer `v2fc/.env` après
 ```bash
 ./install/setup-env.sh
 # puis éditer v2fc/.env : CORS_ORIGINS=http://<ip-ou-nom-de-la-vm>:5173
+#                         V2FC_WEB_BIND=0.0.0.0   (interface accessible depuis ton poste)
 ./install/build-datamover.sh   # x86-64 natif ici, pas de Rosetta : plus rapide que sur le Mac
 ./install/start-webapp.sh
 docker compose exec api python3 -m api.seed_admin --email TON_EMAIL   # mot de passe demandé interactivement

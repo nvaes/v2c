@@ -96,7 +96,9 @@ services:
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
     ports:
-      - "127.0.0.1:5173:5173"
+      # Adresse d'écoute de l'interface : V2FC_WEB_BIND dans .env (0.0.0.0
+      # pour y accéder depuis un autre poste, déploiement sur VM).
+      - "${V2FC_WEB_BIND:-127.0.0.1}:5173:5173"
     volumes:
       # Montage du code en dev pour le rechargement à chaud (Vite) ; le
       # node_modules du conteneur reste isolé grâce au volume anonyme
