@@ -72,6 +72,17 @@ def _urn_tail(urn: str) -> str:
     return urn.rsplit(":", 1)[-1]
 
 
+def _full_urn(site_id: str, kind: str, urn: str) -> str:
+    """« 5 » -> « urn:sites:0A7D0FDA:datastores:5 » ; une URN complète passe telle quelle.
+
+    Constaté le 26/10/2026 sur le VRM de Nicolas : `GET <host_uri>/<id>/datastores`
+    renvoie `"urn": "5"` (identifiant nu), alors que `GET <site>/datastores/5`
+    renvoie l'URN complète — et `createattachvol` refuse l'identifiant nu
+    (`10000001`, « format de requête invalide »).
+    """
+    return urn if urn.startswith("urn:") else f"urn:sites:{site_id}:{kind}:{urn}"
+
+
 def _error_detail(resp: "requests.Response") -> str:
     try:
         body = resp.json()
@@ -259,6 +270,7 @@ class FusionComputeClient:
             host_id = _urn_tail(host["urn"])
             data = self._get(f"/sites/{self.site.id}/hosts/{host_id}/datastores")
             for ds in data.get("datastores", []):
+                ds = {**ds, "urn": _full_urn(self.site.id, "datastores", ds["urn"])}
                 seen.setdefault(ds["urn"], ds)
         return list(seen.values())
 
@@ -364,7 +376,8 @@ class FusionComputeClient:
         body = {
             "name": name,
             "quantityGB": quantity_gb,
-            "datastoreUrn": datastore_urn,
+            # Les plans enregistrés avant le 26/10/2026 ont un identifiant nu.
+            "datastoreUrn": _full_urn(self.site.id, "datastores", datastore_urn),
             "isThin": is_thin,
             "type": vol_type,
             "indepDisk": indep_disk,

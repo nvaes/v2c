@@ -1581,3 +1581,20 @@ l'endpoint FusionCompute cible du plan (premier proposé par défaut), plus
 chaque job existant. Côté API, `POST /jobs` refuse désormais (400) un
 relais qui n'appartient pas à l'endpoint cible du plan. L'enregistrement
 d'un relais se fait toujours par `POST /relays` (pas de formulaire).
+
+## 20. Provisioning FusionCompute : URN de datastore et échec masqué (26/10/2026)
+
+Premier provisioning réel (job R00vSkypeEd, relais `i-0000000D`) :
+`createattachvol` refusé par le VRM (`10000001`, « format de requête
+invalide »), mais le job passait quand même en SEEDING — un seed aurait
+écrit 100 Go en local sans le dire.
+
+- **Cause** : `GET <host>/datastores` renvoie un identifiant nu (`"urn": "5"`),
+  repris tel quel comme `datastoreUrn`. `GET <site>/datastores/5` donne la
+  vraie URN `urn:sites:0A7D0FDA:datastores:5`. `list_datastores()` et
+  `create_and_attach_volume()` complètent désormais l'URN (`_full_urn`),
+  ce qui couvre aussi les plans déjà enregistrés avec `5`.
+- **Échec visible** : une création de volume en erreur fait passer le job
+  en FAILED (502), au lieu de SEEDING.
+- **Pas encore vérifié** : la création d'un volume avec l'URN complète n'a
+  pas été testée sur le VRM (essai bloqué côté permissions de la session).

@@ -210,6 +210,7 @@ async def provision_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                                 detail=f"connexion FusionCompute impossible : {exc}") from exc
 
+    volume_errors: list[str] = []
     try:
         relay_vm_id = relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1] if relay else None
         for d in disks:
@@ -231,6 +232,7 @@ async def provision_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                     await _log(db, job.id,
                               f"volume {resp['urn']} créé et attaché au relais pour le disque {d['device_key']}")
                 except fc.FusionComputeError as exc:
+                    volume_errors.append(f"disque {d['device_key']} : {exc}")
                     await _log(db, job.id,
                               f"création du volume échouée pour le disque {d['device_key']} : {exc}", "error")
             db.add(job_disk)
@@ -241,6 +243,18 @@ async def provision_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     finally:
         if fc_client is not None:
             fc_client.close()
+
+    if volume_errors:
+        # Sans volume cible, un seed écrirait silencieusement en local : le job
+        # échoue. Les volumes déjà créés restent attachés au relais (leur URI
+        # est dans job_disks) — à détacher/supprimer avant de recréer le job.
+        _set_state(job, "FAILED")
+        await _log(db, job.id, "provisioning échoué — aucun seed possible sans tous les "
+                               "volumes cibles ; supprimer ce job et le recréer", "error")
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail="création de volume FusionCompute échouée — "
+                                   + " ; ".join(volume_errors))
 
     _set_state(job, "SEEDING")
     await _log(db, job.id, "provisioning terminé — prêt pour le seed")

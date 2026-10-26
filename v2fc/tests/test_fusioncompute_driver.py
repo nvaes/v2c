@@ -153,6 +153,20 @@ def test_list_datastores_dedupes_shared_datastore_across_hosts(monkeypatch):
     assert out[0]["urn"] == shared_ds["urn"]
 
 
+def test_list_datastores_completes_bare_urn_from_host_listing(monkeypatch):
+    # VRM réel (26/10/2026) : la liste par hôte renvoie "urn": "5".
+    session = FakeSession()
+    client = make_client(monkeypatch, session)
+    session.on("GET", "/sites/05C9108A/hosts", FakeResponse(json_data={"hosts": [
+        {"urn": "urn:sites:05C9108A:hosts:1", "name": "cna-1"},
+    ]}))
+    session.on("GET", "/sites/05C9108A/hosts/1/datastores",
+              FakeResponse(json_data={"datastores": [{"urn": "5", "name": "LUN_5"}]}))
+
+    out = client.list_datastores()
+    assert out[0]["urn"] == "urn:sites:05C9108A:datastores:5"
+
+
 # --------------------------------------------------------------------------
 # Réseaux (DVS -> port groups, annotés du DVS parent)
 # --------------------------------------------------------------------------
@@ -246,6 +260,18 @@ def test_create_and_attach_volume_sends_documented_fields(monkeypatch):
     }
     assert out["urn"] == "urn:sites:1:volumes:78"
     assert out["taskUri"] == "service/sites/1/tasks/1"
+
+
+def test_create_and_attach_volume_completes_bare_datastore_id(monkeypatch):
+    session = FakeSession()
+    client = make_client(monkeypatch, session)
+    session.on("POST", "/vms/42/action/createattachvol", FakeResponse(json_data={
+        "urn": "u", "uri": "u", "taskUrn": "t", "taskUri": "t"}))
+
+    client.create_and_attach_volume("42", name="d", quantity_gb=1, datastore_urn="5")
+
+    call = next(c for c in session.calls if c["url"].endswith("/action/createattachvol"))
+    assert call["json"]["datastoreUrn"] == f"urn:sites:{client.site.id}:datastores:5"
 
 
 def test_attach_volume_defaults_to_virtio(monkeypatch):
