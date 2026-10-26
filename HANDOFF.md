@@ -1713,3 +1713,12 @@ seule recréée) : un réseau de destination par carte réseau source.
 
 Vérifié sur le vCenter réel : R00vSkypeEd = 2 × E1000e (« VLAN 2552 – BE
 Server », « DMZ DPortGroup »), R00vSkype-OVOC = 1 × Vmxnet3.
+
+## 26. Option « conserver la MAC » par carte (26/10/2026)
+
+Case à cocher par carte sur la page « Cible FusionCompute » (`keep_mac` dans
+`nic_mappings`, défaut non ; pas de migration, champ JSON). À la bascule, la
+carte est créée avec `"mac": <MAC source>`. Vérifié sur le VRM réel : une VM
+de test créée avec `00:50:56:3f:00:01` a bien reçu cette MAC (VM supprimée
+ensuite). Risque signalé dans l'interface : ne pas rallumer la source
+(rollback) en même temps que la cible sur le même réseau (MAC en double).

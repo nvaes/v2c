@@ -46,6 +46,7 @@ export default function PlanTargetPage() {
   const [nicsError, setNicsError] = useState<string | null>(null);
   // Choix en cours par VM puis par clé de carte ("" = ne pas recréer).
   const [pendingNics, setPendingNics] = useState<Record<string, Record<number, string>>>({});
+  const [pendingKeepMac, setPendingKeepMac] = useState<Record<string, Record<number, boolean>>>({});
 
   const fcEndpoints = useMemo(
     () => endpoints.filter((e) => e.kind === "fusioncompute"),
@@ -105,6 +106,12 @@ export default function PlanTargetPage() {
     const saved = vm.nic_mappings.find((m) => m.device_key === nic.device_key);
     if (saved) return saved.tgt_network_urn ?? "";
     return index === 0 && vm.nic_mappings.length === 0 ? vm.tgt_network_urn ?? "" : "";
+  }
+
+  function nicKeepMac(vm: PlanVmOut, nic: SourceNic): boolean {
+    const pending = pendingKeepMac[vm.id]?.[nic.device_key];
+    if (pending !== undefined) return pending;
+    return vm.nic_mappings.find((m) => m.device_key === nic.device_key)?.keep_mac ?? false;
   }
 
   function setPendingNic(vmId: string, deviceKey: number, urn: string) {
@@ -168,6 +175,7 @@ export default function PlanTargetPage() {
                   mac: nic.mac, src_network: nic.network,
                   tgt_network_urn: urn || null,
                   tgt_network_name: urn ? networks.find((n) => n.urn === urn)?.name ?? null : null,
+                  keep_mac: nicKeepMac(vm, nic),
                 };
               }),
             }
@@ -178,6 +186,11 @@ export default function PlanTargetPage() {
       });
       setPlan(updated);
       setPendingNics((prev) => {
+        const next = { ...prev };
+        delete next[vmId];
+        return next;
+      });
+      setPendingKeepMac((prev) => {
         const next = { ...prev };
         delete next[vmId];
         return next;
@@ -208,7 +221,9 @@ export default function PlanTargetPage() {
       <p className="muted">
         Étapes 3 à 5 : connexion à un environnement FusionCompute, puis choix du datastore et,
         pour chaque carte réseau de la VM source, du réseau de destination. Une carte laissée sur
-        « ne pas recréer » n'existera pas sur la VM migrée.
+        « ne pas recréer » n'existera pas sur la VM migrée. « Conserver la MAC » recrée la carte
+        avec l'adresse MAC source : ne rallume pas la VM source (rollback) en même temps que la VM
+        migrée sur le même réseau, les deux auraient la même MAC.
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -320,6 +335,18 @@ export default function PlanTargetPage() {
                                   </option>
                                 ))}
                               </select>
+                              <label className="muted" style={{ marginLeft: 8 }}>
+                                <input
+                                  type="checkbox"
+                                  disabled={!nicTarget(vm, nic, i)}
+                                  checked={nicKeepMac(vm, nic)}
+                                  onChange={(e) => setPendingKeepMac((prev) => ({
+                                    ...prev,
+                                    [vm.id]: { ...prev[vm.id], [nic.device_key]: e.target.checked },
+                                  }))}
+                                />{" "}
+                                conserver la MAC
+                              </label>
                             </div>
                           ))
                         ) : (

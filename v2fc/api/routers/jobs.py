@@ -499,13 +499,16 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
 
 
 def _target_nics(plan_vm: PlanVm | None) -> list[dict]:
-    """Une carte FusionCompute par carte source mappée, dans l'ordre source ;
-    plan antérieur au mapping par carte : la seule carte de tgt_network_urn."""
+    """Une carte FusionCompute par carte source mappée, dans l'ordre source,
+    avec la MAC source si demandé (champ `mac` accepté par le VRM, vérifié le
+    26/10/2026) ; plan antérieur au mapping par carte : la seule carte de
+    tgt_network_urn."""
     if plan_vm is None:
         return []
     mapped = [n for n in (plan_vm.nic_mappings or []) if n.get("tgt_network_urn")]
     if mapped:
-        return [{"portGroupUrn": n["tgt_network_urn"]}
+        return [{"portGroupUrn": n["tgt_network_urn"],
+                 **({"mac": n["mac"]} if n.get("keep_mac") and n.get("mac") else {})}
                 for n in sorted(mapped, key=lambda n: n["device_key"])]
     return [{"portGroupUrn": plan_vm.tgt_network_urn}] if plan_vm.tgt_network_urn else []
 

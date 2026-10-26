@@ -142,6 +142,7 @@ export interface PlanVmOut {
 export interface PlanNicMapping {
   device_key: number; label: string; adapter: string; mac: string; src_network: string;
   tgt_network_urn: string | null; tgt_network_name: string | null;
+  keep_mac: boolean;
 }
 export interface SourceNic {
   device_key: number; label: string; adapter: string; mac: string; network: string;

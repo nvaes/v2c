@@ -173,6 +173,9 @@ class PlanNicMapping(BaseModel):
     src_network: str = ""
     tgt_network_urn: str | None = None
     tgt_network_name: str | None = None
+    # Recréer la carte avec la MAC source (réservation DHCP, licence liée à
+    # la MAC...) plutôt qu'une MAC attribuée par FusionCompute.
+    keep_mac: bool = False
 
 
 class SourceNic(BaseModel):
