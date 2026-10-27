@@ -146,8 +146,10 @@ export default function MigrationPage() {
   // Action globale en cours sur un plan (premier seed, planification).
   const [planProgress, setPlanProgress] = useState<Record<string, string>>({});
 
+  // Rafraîchissement silencieux (27/10/2026) : `loading` ne vaut true qu'au
+  // premier chargement — afficher « Chargement… » toutes les 5 s décalait
+  // les blocs de plan vers le bas puis les remontait.
   function refresh() {
-    setLoading(true);
     setError(null);
     Promise.all([api.listPlans(), api.listJobs(), api.listRelays()])
       .then(([p, j, r]) => {
@@ -338,7 +340,6 @@ export default function MigrationPage() {
         </p>
       )}
       {error && <p className="error">{error}</p>}
-      {loading && <p className="muted">Chargement…</p>}
 
       {!loading && plans.filter((p) => p.target_id).length === 0 && (
         <p className="muted">

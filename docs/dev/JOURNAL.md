@@ -1909,3 +1909,11 @@ runner) — le trafic qui quitte le serveur est donc entièrement en HTTPS.
 
 Redémarrer l'API pendant un seed ne l'interrompt pas : le round a continué,
 les rapports d'avancement ont repris après le redémarrage.
+
+## 37. Page Migration : rafraîchissement sans saut d'affichage (27/10/2026)
+
+Le rafraîchissement automatique (toutes les 5 s) affichait « Chargement… »
+au-dessus des plans : les blocs descendaient puis remontaient à chaque
+cycle. `refresh()` ne touche plus `loading`, qui ne sert qu'au premier
+chargement (masquer « Aucun plan… » avant la première réponse) ; la ligne
+« Chargement… » est retirée. Le rafraîchissement périodique est inchangé.
