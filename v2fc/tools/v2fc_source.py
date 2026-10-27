@@ -570,14 +570,14 @@ def cmd_job_run(args) -> int:
     if status_ == "success" and volumes:
         devices = [volumes[k][0] for k in sorted(volumes)]
         gd = guest_drivers.inspect(devices)
-        # Delta final (VM source arrêtée, volumes cohérents) : une VM Linux
-        # sans virtio à l'initramfs est convertie sur les volumes cibles, pour
-        # démarrer en VIRTIO. Windows : pas de conversion (pilotes à installer
-        # dans la VM source). V2FC_CONVERT_LINUX=0 pour désactiver.
-        if (ctx["round_kind"] == "FINAL" and gd["os"] == "linux" and gd["storage"] != "ok"
+        # Delta final (VM source arrêtée, volumes cohérents) : une VM Linux est
+        # préparée sur les volumes cibles — noms d'interfaces fixés par MAC,
+        # virtio ajouté à l'initramfs s'il manque. Windows : rien (pilotes à
+        # installer dans la VM source). V2FC_CONVERT_LINUX=0 pour désactiver.
+        if (ctx["round_kind"] == "FINAL" and gd["os"] == "linux"
                 and os.environ.get("V2FC_CONVERT_LINUX", "1") != "0"):
-            conversion = guest_drivers.convert_linux(devices)
-            if conversion["converted"]:
+            conversion = guest_drivers.convert_linux(devices, nics=ctx.get("nics", []))
+            if conversion["guest_drivers"]["os"]:
                 gd = conversion["guest_drivers"]
             gd["conversion"] = conversion["message"]
         report["guest_drivers"] = gd

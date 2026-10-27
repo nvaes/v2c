@@ -345,11 +345,19 @@ async def get_run_context(job_id: uuid.UUID, round: str,
 
     source = await db.get(Endpoint, job.source_id)
     job_disks = (await db.execute(select(JobDisk).where(JobDisk.job_id == job_id))).scalars().all()
+    plan_vm = (await db.execute(
+        select(PlanVm).where(PlanVm.src_instance_uuid == job.src_instance_uuid,
+                             PlanVm.plan_id == job.plan_id))).scalar_one_or_none()
     await _log(db, job.id, f"round {kind} (#{round_row.round_no}) démarré (job-run)")
     await db.commit()
     return {
         "disks": [{"device_key": d.device_key, "tgt_dev_path": d.tgt_dev_path,
                    "volume_id": d.tgt_volume_uri} for d in job_disks],
+        # mêmes cartes, même ordre que _target_nics à la finalisation
+        "nics": [{"device_key": n["device_key"], "mac": n.get("mac") or "",
+                  "keep_mac": bool(n.get("keep_mac"))}
+                 for n in sorted((n for n in (plan_vm.nic_mappings or []) if n.get("tgt_network_urn")),
+                                 key=lambda n: n["device_key"])] if plan_vm else [],
         "job_id": job.id, "round_id": round_row.id, "round_kind": kind,
         "round_no": round_row.round_no, "src_host": source.url, "src_port": source.port,
         "src_verify_tls": source.verify_tls, "vm_moref": job.src_vm_moref,

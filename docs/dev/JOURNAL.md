@@ -2032,3 +2032,28 @@ s'appliquer au premier démarrage.
 
 Image runner : libguestfs-tools, python3-guestfs et linux-image-amd64
 (+1,2 Go environ).
+
+### 42 bis. Noms d'interfaces Linux fixés par MAC (27/10/2026)
+
+Vu sur une VM CentOS 7 du lot : `ifcfg-ens160` (IP fixe) lié au nom de la
+carte VMware, sans HWADDR. Sur FusionCompute, la carte virtio porte un autre
+nom : la config ne s'appliquerait pas, VM sans réseau au démarrage.
+
+- `run-context` transmet les cartes de la VM cible (`nics` : clé, MAC,
+  `keep_mac`), dans l'ordre de `_target_nics`.
+- `convert_linux` (au delta final, pour toute VM Linux, plus seulement
+  quand virtio manque) : relève les noms « prévisibles » (ens*, enp*s*,
+  eno*) dans ifcfg, NetworkManager, interfaces, netplan et networkd, les
+  associe dans l'ordre des slots PCI VMware (ens160 < ens192 < ens224) aux
+  cartes cibles, et écrit `/etc/udev/rules.d/70-v2fc-net-names.rules`
+  (`ATTR{address}==<MAC>, NAME=<ancien nom>`). Seulement pour les cartes
+  dont la MAC source est conservée (« garder la MAC » du plan) ; sinon le
+  message de conversion le signale. Rien n'est fixé si le nombre de noms
+  diffère du nombre de cartes, ni pour ethN.
+- Détection : `/dev/sdX` dans fstab/GRUB fait passer le stockage `ok` à
+  `inactive` (la finalisation reste en IDE).
+- Essai sur les vrais volumes de cette VM, en surcouche jetée
+  (`readonly=True`) : règle `ens160` écrite, virtio ajouté à l'initramfs
+  (noyau 3.10.0-693), stockage `ok`, en 9 min 30 (émulation). C'est le
+  temps ajouté à la bascule d'une VM Linux.
+- « Garder la MAC » activé dans le plan pour cette VM.

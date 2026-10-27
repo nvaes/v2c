@@ -264,6 +264,12 @@ def _linux(g, result: dict) -> None:
                 + ("dans l'initramfs" if in_initrd else
                    "absent de l'initramfs" if initrd_names is not None else
                    "initramfs non vérifié"))
+    by_name = _disk_names_used(g)
+    if by_name and storage == "ok":
+        storage = "inactive"
+        result["details"].append(
+            f"disques désignés par /dev/sdX dans {', '.join(by_name)} : ils s'appelleraient "
+            "/dev/vdX en virtio — passer en UUID/LABEL pour démarrer en VIRTIO")
     result["storage"] = storage
     net = [n for n in _LINUX_NETWORK if n in builtin or n in on_disk]
     result["network"] = "ok" if net else "absent"
@@ -279,18 +285,32 @@ _DRACUT_CONF = "/etc/dracut.conf.d/90-v2fc-virtio.conf"
 _DISK_NAME_RE = re.compile(r"/dev/(sd|hd)[a-z]")
 
 
-def convert_linux(devices: list[str], readonly: bool = False) -> dict:
-    """
-    Ajoute les pilotes virtio à l'initramfs du noyau par défaut d'une VM
-    Linux copiée (après le delta final : VM source arrêtée, volumes cohérents),
-    pour qu'elle démarre sur des disques VIRTIO. Écrit sur les volumes cibles
-    seulement — jamais sur la source. `readonly` : essai dans une surcouche
-    jetée (tests).
+def _disk_names_used(g) -> list[str]:
+    """Fichiers de démarrage qui désignent un disque par /dev/sdX ou /dev/hdX."""
+    return [f for f in ("/etc/fstab", "/etc/default/grub", "/boot/grub2/grubenv",
+                        "/etc/kernel/cmdline")
+            if g.is_file(f) and _DISK_NAME_RE.search(_uncommented(g.cat(f)))]
 
-    Renvoie {"converted": bool, "message": str, "guest_drivers": inspection
-    après coup}. Refuse (converted=False) si l'OS n'est pas Linux, si fstab ou
-    la ligne de commande du noyau nomment un disque /dev/sdX, ou si aucun
-    outil d'initramfs connu n'est présent.
+
+def convert_linux(devices: list[str], nics: list[dict] | None = None,
+                  readonly: bool = False) -> dict:
+    """
+    Prépare une VM Linux copiée à démarrer sur FusionCompute, après le delta
+    final (VM source arrêtée, volumes cohérents). Écrit sur les volumes
+    cibles seulement — jamais sur la source. `readonly` : essai dans une
+    surcouche jetée (tests).
+
+    1. Noms d'interfaces : une config réseau liée au nom VMware (ens160...)
+       ne s'appliquerait pas à la carte virtio, nommée autrement. Les noms
+       trouvés sont associés dans l'ordre aux cartes cibles (`nics`, ordre de
+       création) et fixés par MAC (règle udev) — pour les cartes dont la MAC
+       source est conservée seulement.
+    2. Stockage, si virtio n'est pas déjà à l'initramfs : pilotes ajoutés à
+       l'initramfs du noyau par défaut (dracut ou update-initramfs). Pas fait
+       si fstab ou GRUB nomment un disque /dev/sdX.
+
+    Renvoie {"converted": bool (stockage virtio prêt), "message": str,
+    "guest_drivers": inspection après coup}.
     """
     out = {"converted": False, "message": "", "guest_drivers": _new_result()}
     try:
@@ -298,6 +318,7 @@ def convert_linux(devices: list[str], readonly: bool = False) -> dict:
     except (ImportError, RuntimeError) as exc:
         out["message"] = f"conversion impossible : {exc}"
         return out
+    messages = []
     try:
         if root is None or g.inspect_get_type(root) != "linux":
             out["message"] = "pas de système Linux sur les disques : rien à convertir"
@@ -306,52 +327,104 @@ def convert_linux(devices: list[str], readonly: bool = False) -> dict:
         for mp in sorted(mounts, key=len):
             g.mount(mounts[mp], mp)
 
-        by_name = [f for f in ("/etc/fstab", "/etc/default/grub", "/boot/grub2/grubenv",
-                               "/etc/kernel/cmdline")
-                   if g.is_file(f) and _DISK_NAME_RE.search(_uncommented(g.cat(f)))]
-        if by_name:
-            out["message"] = (f"disques désignés par /dev/sdX dans {', '.join(by_name)} : "
-                              "ils s'appelleront /dev/vdX en virtio — passer en UUID avant "
-                              "la bascule ; conversion non faite")
-            return out
+        messages.append(_pin_interface_names(g, nics or []))
 
-        kernel, initrd = _default_kernel(g)
-        if kernel is None:
-            out["message"] = "aucun noyau dans /lib/modules : conversion non faite"
-            return out
-        dracut = next((p for p in ("/usr/bin/dracut", "/sbin/dracut", "/usr/sbin/dracut")
-                       if g.is_file(p)), None)
-        if dracut:
-            # Conservé pour les mises à jour de noyau ultérieures.
-            g.write(_DRACUT_CONF, f'add_drivers+=" {_LINUX_INITRD_DRIVERS} "\n'.encode())
-            target = initrd or f"/boot/initramfs-{kernel}.img"
-            # --no-hostonly : en mode hostonly, dracut choisirait les pilotes
-            # du matériel de l'appliance libguestfs, pas de la VM.
-            g.command([dracut, "-f", "--no-hostonly", target, kernel])
-            how = f"dracut, noyau {kernel}"
-        elif g.is_file("/usr/sbin/update-initramfs"):
-            modules = "/etc/initramfs-tools/modules"
-            existing = g.cat(modules) if g.is_file(modules) else ""
-            missing = [m for m in _LINUX_INITRD_DRIVERS.split() if m not in existing.split()]
-            if missing:
-                g.write(modules, (existing.rstrip("\n") + "\n" + "\n".join(missing)
-                                  + "\n").encode())
-            g.command(["/usr/sbin/update-initramfs", "-u", "-k", kernel])
-            how = f"update-initramfs, noyau {kernel}"
+        before = _new_result()
+        _inspect_mounted(g, root, before)
+        if before["storage"] == "ok":
+            messages.append("pilotes virtio déjà dans l'initramfs")
         else:
-            out["message"] = "ni dracut ni update-initramfs dans la VM : conversion non faite"
-            return out
-
+            messages.append(_rebuild_initramfs(g))
         g.sync()
         _inspect_mounted(g, root, out["guest_drivers"])
         out["converted"] = out["guest_drivers"]["storage"] == "ok"
-        out["message"] = (f"pilotes virtio ajoutés à l'initramfs ({how})" if out["converted"]
-                          else f"initramfs reconstruit ({how}) mais virtio toujours absent")
     except RuntimeError as exc:
-        out["message"] = f"conversion échouée : {exc}"
+        messages.append(f"conversion échouée : {exc}")
     finally:
         _close(g)
+    out["message"] = " ; ".join(m for m in messages if m)
     return out
+
+
+def _rebuild_initramfs(g) -> str:
+    by_name = _disk_names_used(g)
+    if by_name:
+        return (f"disques désignés par /dev/sdX dans {', '.join(by_name)} : ils "
+                "s'appelleront /dev/vdX en virtio — passer en UUID avant la bascule ; "
+                "initramfs non modifié")
+    kernel, initrd = _default_kernel(g)
+    if kernel is None:
+        return "aucun noyau dans /lib/modules : initramfs non modifié"
+    dracut = next((p for p in ("/usr/bin/dracut", "/sbin/dracut", "/usr/sbin/dracut")
+                   if g.is_file(p)), None)
+    if dracut:
+        # Conservé pour les mises à jour de noyau ultérieures.
+        g.write(_DRACUT_CONF, f'add_drivers+=" {_LINUX_INITRD_DRIVERS} "\n'.encode())
+        # --no-hostonly : en mode hostonly, dracut choisirait les pilotes
+        # du matériel de l'appliance libguestfs, pas de la VM.
+        g.command([dracut, "-f", "--no-hostonly", initrd or f"/boot/initramfs-{kernel}.img",
+                   kernel])
+        return f"pilotes virtio ajoutés à l'initramfs (dracut, noyau {kernel})"
+    if g.is_file("/usr/sbin/update-initramfs"):
+        modules = "/etc/initramfs-tools/modules"
+        existing = g.cat(modules) if g.is_file(modules) else ""
+        missing = [m for m in _LINUX_INITRD_DRIVERS.split() if m not in existing.split()]
+        if missing:
+            g.write(modules, (existing.rstrip("\n") + "\n" + "\n".join(missing)
+                              + "\n").encode())
+        g.command(["/usr/sbin/update-initramfs", "-u", "-k", kernel])
+        return f"pilotes virtio ajoutés à l'initramfs (update-initramfs, noyau {kernel})"
+    return "ni dracut ni update-initramfs dans la VM : initramfs non modifié"
+
+
+# Noms d'interfaces « prévisibles » liés au slot PCI VMware (ens160, ens192,
+# enp11s0...) : ils changent sur FusionCompute. ethN n'est pas fixé (noms
+# noyau : renommer vers ethN entre en conflit avec le nommage du noyau).
+_IFACE_RE = re.compile(r"\b(ens\d+|enp\d+s\d+(?:f\d+)?|eno\d+)\b")
+_NET_CONFIG_GLOBS = ("/etc/sysconfig/network-scripts/ifcfg-*",
+                     "/etc/NetworkManager/system-connections/*",
+                     "/etc/network/interfaces", "/etc/network/interfaces.d/*",
+                     "/etc/netplan/*.yaml", "/etc/systemd/network/*.network")
+_UDEV_RULE = "/etc/udev/rules.d/70-v2fc-net-names.rules"
+
+
+def _guest_interface_names(g) -> list[str]:
+    names = set()
+    for pattern in _NET_CONFIG_GLOBS:
+        for path in g.glob_expand(pattern):
+            if not g.is_file(path):
+                continue
+            names.update(_IFACE_RE.findall(path.rsplit("/", 1)[-1]))
+            names.update(_IFACE_RE.findall(_uncommented(g.cat(path))))
+    # ordre des slots PCI VMware : ens160 < ens192 < ens224 = cartes 1, 2, 3
+    return sorted(names, key=_version_key)
+
+
+def _pin_interface_names(g, nics: list[dict]) -> str:
+    names = _guest_interface_names(g)
+    if not names:
+        return ""
+    if len(names) != len(nics):
+        return (f"interfaces {', '.join(names)} dans la config réseau pour {len(nics)} carte(s) "
+                "cible(s) : noms non fixés, vérifier le réseau au premier démarrage")
+    rules, unpinned = [], []
+    for name, nic in zip(names, nics):
+        if nic.get("keep_mac") and nic.get("mac"):
+            rules.append(f'SUBSYSTEM=="net", ACTION=="add", '
+                         f'ATTR{{address}}=="{nic["mac"].lower()}", NAME="{name}"')
+        else:
+            unpinned.append(name)
+    if rules:
+        g.write(_UDEV_RULE, ("# V2FC : noms d'interfaces de la VM source, par MAC\n"
+                             + "\n".join(rules) + "\n").encode())
+    parts = []
+    if rules:
+        parts.append("noms d'interfaces fixés par MAC : "
+                     + ", ".join(n for n in names if n not in unpinned))
+    if unpinned:
+        parts.append(f"{', '.join(unpinned)} : MAC source non conservée, nom non fixé — "
+                     "cocher « garder la MAC » dans le plan")
+    return " ; ".join(parts)
 
 
 def _uncommented(text: str) -> str:

@@ -370,12 +370,21 @@ class JobRunContext(BaseModel):
     # Volumes FusionCompute attachés au relais (vide sans relais : écriture
     # dans le --target-dir local, mode POC).
     disks: list["RunContextDisk"] = Field(default_factory=list)
+    # Cartes de la VM cible, dans l'ordre de création (finalisation) : sert à
+    # fixer les noms d'interfaces Linux par MAC au delta final.
+    nics: list["RunContextNic"] = Field(default_factory=list)
 
 
 class RunContextDisk(BaseModel):
     device_key: int
     tgt_dev_path: str | None
     volume_id: str | None
+
+
+class RunContextNic(BaseModel):
+    device_key: int
+    mac: str
+    keep_mac: bool
 
 
 class RunnerWorkItem(BaseModel):
