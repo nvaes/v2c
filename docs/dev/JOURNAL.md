@@ -2066,3 +2066,20 @@ nom : la config ne s'appliquerait pas, VM sans réseau au démarrage.
 - Dates et nombres de toute l'interface en `fr-FR` (`toLocaleString("fr-FR")`,
   `toLocaleTimeString("fr-FR")`) : ils suivaient la langue du navigateur
   (10/27/2026, 12:25 PM).
+
+## 43. Dossiers d'état du runner nettoyés (27/10/2026)
+
+La suppression d'un plan (ou d'un job) supprimait les volumes FusionCompute
+des migrations non terminées, mais pas le dossier d'état du runner
+(`/var/lib/v2fc/jobs/<job>`, volume `v2fc-runner-state`, state.json avec
+les changeId CBT) : 13 dossiers pour 6 jobs. L'API n'a pas accès à ce
+volume, c'est donc le runner qui nettoie.
+
+- `GET /api/v1/runner/job-ids` (réservé au runner) : identifiants des jobs
+  existants.
+- `tools/v2fc_runner.py`, `_cleanup_state` : au démarrage puis toutes les
+  10 min (avec l'enregistrement du relais), supprime les dossiers dont le
+  nom est un UUID de job inconnu de l'API. Jamais si l'API ne répond pas,
+  ni pour un job en cours, ni pour un autre nom de dossier.
+- Premier passage : 7 dossiers orphelins supprimés, 6 restants (un par job).
+- Test : `tests/test_runner_cleanup.py`.

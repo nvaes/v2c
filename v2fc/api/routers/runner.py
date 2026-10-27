@@ -75,6 +75,14 @@ async def get_work(db: AsyncSession = Depends(get_db),
     return work
 
 
+@router.get("/job-ids", response_model=list[uuid.UUID])
+async def get_job_ids(db: AsyncSession = Depends(get_db),
+                      _runner: User = Depends(require_runner)) -> list[uuid.UUID]:
+    """Jobs existants : le runner supprime les dossiers d'état des autres
+    (job supprimé avec son plan, 27/10/2026)."""
+    return list((await db.execute(select(Job.id))).scalars())
+
+
 @router.get("/jobs/{job_id}/source-credentials", response_model=RunnerSourceCredentials)
 async def get_source_credentials(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                                  _runner: User = Depends(require_runner)) -> dict:

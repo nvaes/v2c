@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -101,6 +103,30 @@ def _heartbeat(running: dict, metrics: RelayMetrics) -> None:
         pass
 
 
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _cleanup_state(running: dict) -> None:
+    """
+    Supprime les dossiers d'état (STATE_ROOT/<job>) des jobs qui n'existent
+    plus dans l'API — supprimés avec leur plan (27/10/2026). Rien n'est
+    supprimé si l'API ne répond pas, ni pour un job en cours, ni pour un
+    dossier dont le nom n'est pas un UUID de job.
+    """
+    try:
+        known = set(_get("/api/v1/runner/job-ids").json())
+    except (requests.RequestException, ValueError) as exc:
+        log.warning("liste des jobs indisponible, pas de nettoyage : %s", exc)
+        return
+    for path in STATE_ROOT.iterdir():
+        if not path.is_dir() or not _UUID_RE.match(path.name):
+            continue
+        if path.name in known or path.name in running:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        log.info("dossier d'état du job supprimé %s retiré", path.name)
+
+
 def _start_round(job_id: str, round_kind: str) -> subprocess.Popen:
     cred = _get(f"/api/v1/runner/jobs/{job_id}/source-credentials").json()
     env = {**os.environ, "V2FC_API_TOKEN": TOKEN,
@@ -130,6 +156,7 @@ def main() -> int:
         if time.monotonic() - registered_at >= REGISTER_EVERY_S:
             if _register():
                 registered_at = time.monotonic()
+                _cleanup_state(running)
 
         for job_id, (round_kind, proc) in list(running.items()):
             rc = proc.poll()
