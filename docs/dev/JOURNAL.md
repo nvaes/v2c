@@ -1948,3 +1948,15 @@ les étapes (demandée, extinction, delta final, création de la VM cible,
 terminé), l'état du runner, la barre d'avancement du round et le journal du
 job, relus toutes les 2 s (`getJob` + `getJobLogs?since=`, comme la page
 Logs). Fermer le popup n'interrompt rien.
+
+## 40. Redémarrage automatique de toute la pile (27/10/2026)
+
+Après un redémarrage de la VM relais, seul `runner` était reparti : c'était
+le seul service avec une politique de redémarrage. `postgres`, `redis`,
+`api` et `web` restaient arrêtés (runner tournant sans API) jusqu'à un
+`docker compose up -d` manuel.
+
+Correctif (`v2fc/docker-compose.yml`) : `restart: unless-stopped` sur tous
+les services. Le démon Docker est déjà activé au boot par
+`install/install-docker.sh` (`systemctl enable --now docker`), il relance
+donc la pile complète. Un `docker compose stop` volontaire reste respecté.

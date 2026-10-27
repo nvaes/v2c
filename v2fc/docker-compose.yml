@@ -12,6 +12,10 @@
 #     (mot de passe demandé de façon interactive : seed_admin.py ne l'accepte
 #     jamais en argument, cf. api/seed_admin.py)
 #
+# Tous les services sont en `restart: unless-stopped` : ils repartent seuls
+# au redémarrage de la machine (le démon Docker doit être activé au boot,
+# `systemctl enable docker`, fait par install/install-docker.sh).
+#
 # api applique ses migrations Alembic tout seul à chaque démarrage (voir
 # api/Dockerfile) — pas d'étape manuelle "migrate" à part.
 
@@ -31,6 +35,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -48,6 +53,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   api:
     build:
@@ -67,6 +73,7 @@ services:
       V2FC_RUNNER_TOKEN: ${V2FC_RUNNER_TOKEN:-}
     ports:
       - "127.0.0.1:8000:8000"
+    restart: unless-stopped
 
   # Exécution automatique des rounds (tools/v2fc_runner.py). Doit tourner
   # sur la VM relais elle-même : les volumes FusionCompute y sont attachés et
@@ -107,6 +114,7 @@ services:
       - ./web:/work
       - /work/node_modules
       - ./certs:/certs:ro
+    restart: unless-stopped
 
 volumes:
   v2fc-postgres-data:
