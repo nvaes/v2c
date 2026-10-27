@@ -1861,3 +1861,27 @@ routes restent unitaires (boucle en série côté navigateur) :
   relais du plan (`PUT /delta-schedule` accepte tout état ; le runner ne
   lance le delta que sur un job SYNCED). « Lancer un delta maintenant »
   reste par VM.
+
+## 35. Suppression d'un plan : journal en direct (27/10/2026)
+
+La suppression d'un plan avec des migrations non terminées détache puis
+supprime chaque volume sur FusionCompute (deux tâches VRM attendues par
+volume) : plusieurs minutes sans retour après la confirmation.
+
+- `DELETE /plans/{id}?stream=true` : mêmes vérifications qu'avant (404/409
+  en HTTP classique), puis réponse 200 `application/x-ndjson` — une ligne
+  `{"t","level","msg"}` par étape (connexion VRM, détachement, suppression
+  de chaque volume, jobs, plan), puis `{"done": true}` ou `{"error": ...}`.
+- Le travail tourne dans une tâche asyncio séparée (référence gardée dans
+  `_DELETE_TASKS`), avec sa propre session : depuis FastAPI 0.106 la session
+  de la dépendance est fermée avant l'envoi du corps, et la déconnexion du
+  navigateur ne doit pas interrompre une suppression à moitié faite. Les
+  messages du thread FusionCompute passent par `call_soon_threadsafe`.
+- Sans `stream`, comportement inchangé (204, ou 502 si FusionCompute
+  refuse — rien n'est supprimé côté application).
+- `Plans.tsx` : popup avec le journal, défilement automatique, bouton
+  Fermer actif pendant la suppression. `api.deletePlanStream()` lit le flux
+  avec `fetch` + `TextDecoderStream`.
+
+Vérifié : plan factice sans job supprimé via le proxy Vite, lignes reçues
+puis `done`. Pas encore vérifié sur un plan avec des volumes réels.

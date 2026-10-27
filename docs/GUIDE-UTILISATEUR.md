@@ -180,6 +180,11 @@ remettre.
 La suppression est refusée pendant une copie ou une bascule : attendre la
 fin, ou faire un rollback.
 
+Après confirmation, un popup affiche le **journal de la suppression en
+direct** (détachement puis suppression de chaque volume, jobs, plan). La
+suppression des volumes peut prendre plusieurs minutes ; fermer le popup ne
+l'interrompt pas.
+
 Pensez à générer le rapport **avant** de supprimer le plan.
 
 ## 9. Dépannage

@@ -80,6 +80,46 @@ export const api = {
   // migrations non terminées).
   deletePlan: (id: string, withJobs = false) =>
     request<void>(`/plans/${id}${withJobs ? "?with_jobs=true" : ""}`, { method: "DELETE" }),
+  // Suppression avec journal en direct (NDJSON, une ligne par étape).
+  // Rejette sur une erreur HTTP (409, 404…) ou sur la ligne `error` finale.
+  async deletePlanStream(
+    id: string, withJobs: boolean, onLine: (line: PlanDeleteLogLine) => void,
+  ): Promise<void> {
+    const token = getToken();
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const res = await fetch(
+      `/api/v1/plans/${id}?stream=true${withJobs ? "&with_jobs=true" : ""}`,
+      { method: "DELETE", headers },
+    );
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body.detail ?? JSON.stringify(body);
+      } catch {
+        /* corps non JSON, on garde statusText */
+      }
+      throw new Error(`${res.status} : ${detail}`);
+    }
+    const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        if (!raw.trim()) continue;
+        const line = JSON.parse(raw);
+        if (line.error) throw new Error(line.error);
+        if (line.done) return;
+        onLine(line);
+      }
+    }
+    throw new Error("connexion interrompue — la suppression continue côté serveur, rafraîchir la page");
+  },
   createPlan: (body: PlanCreate) =>
     request<PlanOut>("/plans", { method: "POST", body: JSON.stringify(body) }),
   planPreflight: (id: string) =>
@@ -217,6 +257,12 @@ export interface FcNetwork {
   port_type: number | null; vlan_id: number | null; vlan_range: string | null;
 }
 export interface FcNetworksResponse { networks: FcNetwork[]; }
+
+export interface PlanDeleteLogLine {
+  t: string;
+  level: "info" | "error";
+  msg: string;
+}
 
 export interface PlanVmMappingUpdate {
   datastore_urn?: string | null; datastore_name?: string | null;

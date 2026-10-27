@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, EndpointOut, PlanOut, PlanPreflightResponse } from "../api";
+import { api, EndpointOut, PlanDeleteLogLine, PlanOut, PlanPreflightResponse } from "../api";
 
 export default function PlansPage() {
   const navigate = useNavigate();
@@ -11,6 +11,14 @@ export default function PlansPage() {
   const [preflights, setPreflights] = useState<Record<string, PlanPreflightResponse>>({});
   const [preflightBusy, setPreflightBusy] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Popup de suppression : journal reçu en direct du serveur.
+  const [deleteLog, setDeleteLog] = useState<{
+    planName: string; lines: PlanDeleteLogLine[]; status: "running" | "done" | "error";
+    error?: string;
+  } | null>(null);
+  const logEnd = useRef<HTMLDivElement>(null);
+
+  useEffect(() => logEnd.current?.scrollIntoView({ block: "end" }), [deleteLog?.lines.length]);
 
   function refresh() {
     setLoading(true);
@@ -57,12 +65,17 @@ export default function PlansPage() {
         message += "\nLes VM déjà migrées restent intactes sur FusionCompute.";
       }
       if (!window.confirm(message)) return;
-      await api.deletePlan(plan.id, jobs.length > 0);
+      setDeleteLog({ planName: plan.name, lines: [], status: "running" });
+      await api.deletePlanStream(plan.id, jobs.length > 0, (line) =>
+        setDeleteLog((prev) => prev && { ...prev, lines: [...prev.lines, line] }));
+      setDeleteLog((prev) => prev && { ...prev, status: "done" });
       setPlans((prev) => prev.filter((p) => p.id !== plan.id));
     } catch (err) {
       // 409 si une copie ou une bascule est en cours — le message du
       // backend l'explique déjà, pas la peine de le reformuler.
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      setDeleteLog((prev) => prev && { ...prev, status: "error", error: msg });
     } finally {
       setDeletingId(null);
     }
@@ -80,6 +93,39 @@ export default function PlansPage() {
 
       {error && <p className="error">{error}</p>}
       {loading && <p className="muted">Chargement…</p>}
+
+      {deleteLog && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h2 style={{ margin: 0 }}>Suppression du plan « {deleteLog.planName} »</h2>
+            <p className="muted" style={{ margin: "4px 0 0" }}>
+              {deleteLog.status === "running" &&
+                "En cours… Fermer ce popup n'interrompt pas la suppression."}
+              {deleteLog.status === "done" && "Plan supprimé."}
+              {deleteLog.status === "error" && <span className="error">{deleteLog.error}</span>}
+            </p>
+            <div className="modal-log">
+              {deleteLog.lines.map((l, i) => (
+                <div key={i} className={l.level === "error" ? "log-error" : undefined}>
+                  {new Date(l.t).toLocaleTimeString()} {l.msg}
+                </div>
+              ))}
+              {deleteLog.status === "running" && <div>…</div>}
+              <div ref={logEnd} />
+            </div>
+            <button
+              className={deleteLog.status === "running" ? "secondary" : undefined}
+              style={{ alignSelf: "flex-end" }}
+              onClick={() => {
+                if (deleteLog.status !== "done") refresh();
+                setDeleteLog(null);
+              }}
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
 
       {!loading && plans.length === 0 && (
         <p className="muted">

@@ -36,3 +36,9 @@ table.kv th { width: 230px; background: none; vertical-align: top; }
   main { max-width: none; padding: 0; }
   .report-vm { break-inside: avoid; border: 1px solid #ccc; }
 }
+
+/* Popup (journal de suppression d'un plan). */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: white; border-radius: 6px; padding: 16px; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
+.modal-log { flex: 1; overflow-y: auto; min-height: 160px; background: #111827; color: #e5e7eb; font-family: ui-monospace, monospace; font-size: 12px; padding: 8px; border-radius: 4px; margin: 8px 0; }
+.modal-log .log-error { color: #fca5a5; }

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 from .. import vsphere_bridge
-from ..db import get_db
+from ..db import get_db, get_session_factory
 from ..models import Credential, Endpoint, Job, JobDisk, Plan, PlanVm, Relay, SyncRound, User
 from ..schemas import (PlanCreate, PlanOut, PlanPreflightResponse, PlanTargetUpdate,
                        PlanVmMappingUpdate, SourceNic)
@@ -182,8 +187,9 @@ async def set_plan_vm_mapping(plan_id: uuid.UUID, plan_vm_id: uuid.UUID,
 
 @router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_plan(plan_id: uuid.UUID, with_jobs: bool = False, delete_volumes: bool = True,
+                      stream: bool = False,
                       db: AsyncSession = Depends(get_db),
-                      _user: User = Depends(require_role("operator"))) -> None:
+                      _user: User = Depends(require_role("operator"))) -> Response | None:
     """
     Supprime un plan et ses VM (cascade `plan_vms.plan_id`).
 
@@ -199,6 +205,12 @@ async def delete_plan(plan_id: uuid.UUID, with_jobs: bool = False, delete_volume
     partielles qui occuperaient sinon des emplacements disque du relais.
     Les volumes d'une migration terminée (CUTOVER_DONE) appartiennent à la
     VM migrée : jamais touchés.
+
+    Avec `stream=true` (27/10/2026) : après les vérifications (erreurs HTTP
+    habituelles), répond 200 en NDJSON — une ligne `{"t","level","msg"}` par
+    étape, puis `{"done": true}` ou `{"error": "..."}` — pour le popup de
+    suppression de la page Plans. La suppression tourne dans une tâche à
+    part : fermer le popup ou la page ne l'interrompt pas.
     """
     # VM chargées d'avance : la cascade ORM Plan.vms ne peut pas les charger
     # paresseusement en asynchrone au moment du delete.
@@ -225,23 +237,80 @@ async def delete_plan(plan_id: uuid.UUID, with_jobs: bool = False, delete_volume
                    + ", ".join(f"{j.src_vm_name} ({j.state})" for j in busy)
                    + " — attendre la fin du round ou faire un rollback avant de supprimer")
 
+    if not stream:
+        try:
+            await _delete_plan_work(db, plan, jobs, delete_volumes, lambda level, msg: None)
+        except fc.FusionComputeError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return None
+
+    # La session de la dépendance est fermée avant l'envoi du corps
+    # (FastAPI >= 0.106) : la tâche ouvre la sienne.
+    plan_name, job_ids = plan.name, [j.id for j in jobs]
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[dict] = asyncio.Queue()
+
+    def log(level: str, msg: str) -> None:
+        # Appelé aussi depuis le thread des appels FusionCompute.
+        line = {"t": datetime.now(timezone.utc).isoformat(), "level": level, "msg": msg}
+        loop.call_soon_threadsafe(queue.put_nowait, line)
+
+    async def work() -> None:
+        try:
+            async with get_session_factory()() as session:
+                p = (await session.execute(select(Plan).where(Plan.id == plan_id)
+                                           .options(selectinload(Plan.vms)))).scalar_one()
+                js = (await session.execute(select(Job).where(Job.id.in_(job_ids)))).scalars().all()
+                await _delete_plan_work(session, p, js, delete_volumes, log)
+            loop.call_soon_threadsafe(queue.put_nowait, {"done": True})
+        except Exception as exc:  # noqa: BLE001 — rapporté dans le popup
+            log("error", str(exc))
+            loop.call_soon_threadsafe(queue.put_nowait, {"error": str(exc)})
+
+    task = asyncio.create_task(work())
+    _DELETE_TASKS.add(task)
+    task.add_done_callback(_DELETE_TASKS.discard)
+    log("info", f"suppression du plan « {plan_name} » : {len(job_ids)} job(s)")
+
+    async def body():
+        while True:
+            line = await queue.get()
+            yield json.dumps(line, ensure_ascii=False) + "\n"
+            if "done" in line or "error" in line:
+                return
+
+    return StreamingResponse(body(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# Références fortes sur les suppressions en cours (sinon le GC peut
+# collecter une tâche asyncio dont plus personne n'attend le résultat).
+_DELETE_TASKS: set[asyncio.Task] = set()
+
+
+async def _delete_plan_work(db: AsyncSession, plan: Plan, jobs: list[Job], delete_volumes: bool,
+                            log: Callable[[str, str], None]) -> None:
+    """Volumes FusionCompute, jobs puis plan. Un échec FusionCompute laisse
+    jobs et plan intacts côté application (rien n'est commité)."""
     if delete_volumes:
         for job in jobs:
             if job.state == "CUTOVER_DONE":
+                log("info", f"{job.src_vm_name} : migration terminée, volumes conservés")
                 continue
             try:
-                await _release_volumes(db, job)
+                await _release_volumes(db, job, log)
             except fc.FusionComputeError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"suppression des volumes de {job.src_vm_name} sur FusionCompute "
-                           f"impossible : {exc} — rien n'a été supprimé côté application") from exc
+                raise fc.FusionComputeError(
+                    f"suppression des volumes de {job.src_vm_name} sur FusionCompute "
+                    f"impossible : {exc} — rien n'a été supprimé côté application") from exc
 
     for job in jobs:
         await db.delete(job)
+        log("info", f"{job.src_vm_name} : job et historique supprimés")
     await db.flush()
     await db.delete(plan)
     await db.commit()
+    log("info", f"plan « {plan.name} » supprimé")
 
 
 # Copie ou bascule en cours : un job dans ces états ne se supprime pas.
@@ -249,35 +318,44 @@ _BUSY_STATES = {"PROVISIONING", "CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA",
                 "FINALIZING", "ROLLBACK"}
 
 
-async def _release_volumes(db: AsyncSession, job: Job) -> None:
+async def _release_volumes(db: AsyncSession, job: Job,
+                           log: Callable[[str, str], None] = lambda level, msg: None) -> None:
     """Détache du relais puis supprime les volumes FusionCompute d'un job."""
     disks = [d for d in (await db.execute(
         select(JobDisk).where(JobDisk.job_id == job.id))).scalars() if d.tgt_volume_uri]
     if not disks:
+        log("info", f"{job.src_vm_name} : aucun volume FusionCompute à supprimer")
         return
     target = await db.get(Endpoint, job.target_id)
     args = await _connection_args(db, target)
     relay = await db.get(Relay, job.relay_id) if job.relay_id else None
+    name = job.src_vm_name
 
     def _release() -> None:
+        log("info", f"{name} : connexion au VRM {args['host']}")
         with fc.FusionComputeClient(args["host"], args["user"], args["password"],
                                     port=target.port or fc.DEFAULT_API_PORT,
                                     verify=target.verify_tls) as client:
             relay_vm_id = relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1] if relay else None
             on_relay = ({d["volumeUrn"] for d in client.get_vm(relay_vm_id)["vmConfig"]["disks"]}
                         if relay_vm_id else set())
-            for d in disks:
+            for i, d in enumerate(disks, 1):
                 vol_id = d.tgt_volume_uri.rstrip("/").rsplit("/", 1)[-1]
                 urn = f"urn:sites:{client.site.id}:volumes:{vol_id}"
+                label = f"{name} : volume {i}/{len(disks)} ({vol_id}, {d.capacity_bytes / 2**30:.0f} Gio)"
                 try:
                     client.get_volume(vol_id)
                 except fc.FusionComputeError:
-                    continue                      # déjà supprimé
+                    log("info", f"{label} déjà supprimé")
+                    continue
                 if urn in on_relay:
+                    log("info", f"{label} : détachement du relais…")
                     client.wait_task(client.detach_volume(relay_vm_id, vol_urn=urn)["taskUri"])
+                log("info", f"{label} : suppression…")
                 task = client.delete_volume(vol_id).get("taskUri")
                 if task:
                     client.wait_task(task)
+                log("info", f"{label} supprimé")
 
     await run_in_threadpool(_release)
 
