@@ -88,7 +88,9 @@ le premier administrateur (mot de passe demandé au clavier). Il peut être
 relancé sans risque : ce qui est déjà fait est conservé. `./install.sh
 --help` pour les options.
 
-À la fin, l'adresse de l'interface s'affiche (`http://<ip>:5173`) : y créer
+À la fin, l'adresse de l'interface s'affiche (`https://<ip>:5173`, certificat
+auto-signé créé par `install/gen-cert.sh` : accepter l'avertissement du
+navigateur à la première visite) : y créer
 les environnements vCenter et FusionCompute (voir le
 [guide utilisateur](docs/GUIDE-UTILISATEUR.md)) ; la VM relais
 s'enregistre seule.
@@ -102,7 +104,8 @@ sudo ./install/install-docker.sh   # Docker + compose selon la distribution
 ./install/check-prereqs.sh         # diagnostic, ne modifie rien
 ./install/setup-env.sh             # crée v2fc/.env et génère les secrets
 #  accès depuis un autre poste : dans v2fc/.env,
-#  CORS_ORIGINS=http://<ip-vm>:5173 et V2FC_WEB_BIND=0.0.0.0
+#  CORS_ORIGINS=https://<ip-vm>:5173 et V2FC_WEB_BIND=0.0.0.0
+./install/gen-cert.sh              # certificat HTTPS auto-signé (v2fc/certs)
 ./install/start-webapp.sh          # build + démarrage (runner si le VDDK est présent)
 cd v2fc && docker compose exec api python3 -m api.seed_admin --email <votre-email>
 ```
@@ -113,7 +116,14 @@ Vérification :
 curl -s http://localhost:8000/api/v1/health
 ```
 
-Interface : <http://localhost:5173> — API : <http://localhost:8000>.
+Interface : <https://localhost:5173> — API : <http://localhost:8000> (locale
+au serveur, l'interface y accède par son proxy `/api`).
+
+HTTPS : l'interface est servie en HTTPS dès que `v2fc/certs/v2fc.crt` et
+`v2fc.key` existent (sinon repli en HTTP, signalé dans `docker compose logs
+web`). `install/gen-cert.sh --force [nom ip…]` refait le certificat auto-signé
+(changement d'IP) ; un certificat d'une autorité interne se dépose sous les
+mêmes noms. Redémarrer ensuite : `docker compose restart web`.
 Les migrations de base (Alembic) s'appliquent automatiquement au démarrage
 de l'API.
 

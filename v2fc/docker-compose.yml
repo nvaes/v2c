@@ -96,7 +96,8 @@ services:
       VITE_API_PROXY_TARGET: http://api:8000
     ports:
       # Adresse d'écoute de l'interface : V2FC_WEB_BIND dans .env (0.0.0.0
-      # pour y accéder depuis un autre poste, déploiement sur VM).
+      # pour y accéder depuis un autre poste, déploiement sur VM). HTTPS
+      # dès que v2fc/certs contient v2fc.crt/v2fc.key (install/gen-cert.sh).
       - "${V2FC_WEB_BIND:-127.0.0.1}:5173:5173"
     volumes:
       # Montage du code en dev pour le rechargement à chaud (Vite) ; le
@@ -105,6 +106,7 @@ services:
       # d'une autre architecture, écraserait celui installé dans l'image).
       - ./web:/work
       - /work/node_modules
+      - ./certs:/certs:ro
 
 volumes:
   v2fc-postgres-data:

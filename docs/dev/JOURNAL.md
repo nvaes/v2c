@@ -1885,3 +1885,27 @@ volume) : plusieurs minutes sans retour après la confirmation.
 
 Vérifié : plan factice sans job supprimé via le proxy Vite, lignes reçues
 puis `done`. Pas encore vérifié sur un plan avec des volumes réels.
+
+## 36. Interface en HTTPS, certificat auto-signé (27/10/2026)
+
+Seule l'interface est exposée (Vite, port 5173) ; l'API reste en HTTP sur
+127.0.0.1:8000 et sur le réseau Docker interne (proxy `/api` de Vite,
+runner) — le trafic qui quitte le serveur est donc entièrement en HTTPS.
+
+- `install/gen-cert.sh [--force] [nom ip…]` : RSA 3072, 10 ans, SAN = nom
+  de la machine + première IP + localhost/127.0.0.1, écrit
+  `v2fc/certs/v2fc.{crt,key}` (ignoré par git). Ne remplace pas un
+  certificat existant sans `--force`. Appelé par `install.sh` après la
+  configuration réseau.
+- `docker-compose.yml` monte `./certs` sur `/certs:ro` dans le service web ;
+  `vite.config.ts` active `server.https` si les deux fichiers existent,
+  sinon HTTP avec un avertissement dans les logs (installation pas encore à
+  jour). Le HMR passe en wss tout seul.
+- `CORS_ORIGINS` passe en `https://…:5173` (install.sh, .env.example, défaut
+  de `api/config.py`). Sur un serveur existant : corriger `CORS_ORIGINS`
+  dans `.env`, lancer `gen-cert.sh`, puis `docker compose up -d web api`.
+- Même port 5173 : l'ancienne URL `http://` ne répond plus (pas de
+  redirection, Vite ne sert qu'un protocole par port).
+
+Redémarrer l'API pendant un seed ne l'interrompt pas : le round a continué,
+les rapports d'avancement ont repris après le redémarrage.

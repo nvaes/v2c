@@ -94,7 +94,8 @@ modifier :
 commande à lancer soi-même s'affiche à la fin (mot de passe demandé de
 façon interactive, jamais en argument — voir `api/seed_admin.py`).
 
-Une fois démarré : interface sur `http://localhost:5173`, API sur
+Une fois démarré : interface sur `https://localhost:5173` (après
+`./install/gen-cert.sh`, sinon en HTTP), API sur
 `http://localhost:8000` (`/api/v1/health` pour vérifier).
 
 Pour arrêter :
@@ -213,7 +214,7 @@ Sur la VM, dans `~/v2fc-deploy` :
 
 Avant de lancer `setup-env.sh`, une différence importante avec ton Mac :
 **`CORS_ORIGINS`** dans `v2fc/.env` doit correspondre à l'origine depuis
-laquelle tu ouvriras vraiment l'interface (pas `http://localhost:5173`,
+laquelle tu ouvriras vraiment l'interface (pas `https://localhost:5173`,
 qui ne sera plus le bon si tu accèdes par l'IP de la VM ou un nom
 d'hôte) — sans ça, le navigateur bloquera les appels à l'API en CORS et la
 connexion échouera silencieusement. Éditer `v2fc/.env` après
@@ -221,15 +222,17 @@ connexion échouera silencieusement. Éditer `v2fc/.env` après
 
 ```bash
 ./install/setup-env.sh
-# puis éditer v2fc/.env : CORS_ORIGINS=http://<ip-ou-nom-de-la-vm>:5173
+# puis éditer v2fc/.env : CORS_ORIGINS=https://<ip-ou-nom-de-la-vm>:5173
 #                         V2FC_WEB_BIND=0.0.0.0   (interface accessible depuis ton poste)
+./install/gen-cert.sh          # certificat HTTPS auto-signé (nom + IP de la VM)
 ./install/build-datamover.sh   # x86-64 natif ici, pas de Rosetta : plus rapide que sur le Mac
 ./install/start-webapp.sh
 docker compose exec api python3 -m api.seed_admin --email TON_EMAIL   # mot de passe demandé interactivement
 ```
 
 Vérifier : `curl http://localhost:8000/api/v1/health`, puis ouvrir
-`http://<ip-de-la-vm>:5173` depuis ton poste.
+`https://<ip-de-la-vm>:5173` depuis ton poste (certificat auto-signé :
+accepter l'avertissement du navigateur).
 
 **Cette VM démarre avec une base vide** : les environnements
 (vCenter/FusionCompute), identifiants et plans déjà créés sur ton Mac ne

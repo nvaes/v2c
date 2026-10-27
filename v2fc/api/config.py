@@ -29,7 +29,7 @@ class Settings:
     runner_token: str = os.environ.get("V2FC_RUNNER_TOKEN", "")
 
     cors_origins: list[str] = [
-        o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
+        o.strip() for o in os.environ.get("CORS_ORIGINS", "https://localhost:5173").split(",")
         if o.strip()
     ]
 

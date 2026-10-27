@@ -5,6 +5,7 @@ vmware-vix-disklib-distrib*/
 
 # --- Secrets ---------------------------------------------------------------
 .env
+v2fc/certs/
 !.env.example
 
 # --- Données de lab (images disque de plusieurs Gio, noms de VM/hôtes) ------

@@ -89,15 +89,16 @@ set_env() {  # set_env CLE VALEUR : remplace la ligne ou l'ajoute
   fi
 }
 if [ "$HOST" = "localhost" ] || [ "$HOST" = "127.0.0.1" ]; then
-  set_env CORS_ORIGINS "http://localhost:5173"
+  set_env CORS_ORIGINS "https://localhost:5173"
   set_env V2FC_WEB_BIND "127.0.0.1"
   echo "interface accessible depuis ce serveur uniquement"
 else
-  set_env CORS_ORIGINS "http://$HOST:5173"
+  set_env CORS_ORIGINS "https://$HOST:5173"
   set_env V2FC_WEB_BIND "0.0.0.0"
-  echo "interface accessible sur http://$HOST:5173"
+  echo "interface accessible sur https://$HOST:5173"
 fi
 chmod 600 "$ENV_FILE"
+"$ROOT/install/gen-cert.sh" "$(hostname)" "$HOST"
 
 # --- 5. Build et démarrage -----------------------------------------------------
 say "5/6 Build et démarrage (peut prendre plusieurs minutes la première fois)"
@@ -128,8 +129,9 @@ else
 fi
 
 say "Installation terminée"
-url="http://$HOST:5173"; [ "$HOST" = "127.0.0.1" ] && url="http://localhost:5173"
+url="https://$HOST:5173"; [ "$HOST" = "127.0.0.1" ] && url="https://localhost:5173"
 echo "Interface : $url"
+echo "            (certificat auto-signé : accepter l'avertissement du navigateur à la première visite)"
 if [ -d "$VDDK_DIR/lib64" ]; then
   echo "Runner    : démarré — il enregistre cette VM comme relais dès que l'environnement"
   echo "            FusionCompute est créé dans l'interface (10 min au plus)."
