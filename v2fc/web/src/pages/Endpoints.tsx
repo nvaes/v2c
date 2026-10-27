@@ -99,7 +99,7 @@ export default function EndpointsPage() {
                 <td>
                   {ep.last_probe_at ? (
                     <span className={`badge ${ep.last_probe_ok ? "ok" : "blocked"}`}>
-                      {ep.last_probe_ok ? "OK" : "échec"} — {new Date(ep.last_probe_at).toLocaleString()}
+                      {ep.last_probe_ok ? "OK" : "échec"} — {new Date(ep.last_probe_at).toLocaleString("fr-FR")}
                     </span>
                   ) : (
                     <span className="muted">jamais sondé</span>

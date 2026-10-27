@@ -66,7 +66,7 @@ export default function LogsPage() {
         {entries.length === 0 && <p className="muted">Aucune entrée pour l'instant.</p>}
         {entries.map((e) => (
           <div key={e.id} className={LEVEL_CLASS[e.level] ?? ""}>
-            <span className="muted">{new Date(e.at).toLocaleTimeString()}</span>{" "}
+            <span className="muted">{new Date(e.at).toLocaleTimeString("fr-FR")}</span>{" "}
             <strong>[{e.level}]</strong> {e.message}
           </div>
         ))}
@@ -117,7 +117,7 @@ export function LogsIndexPage() {
             <tr key={j.id}>
               <td>{j.src_vm_name}</td>
               <td><span className="badge">{j.state}</span></td>
-              <td className="muted">{new Date(j.state_since).toLocaleString()}</td>
+              <td className="muted">{new Date(j.state_since).toLocaleString("fr-FR")}</td>
               <td><Link to={`/jobs/${j.id}/logs`}>voir les logs</Link></td>
             </tr>
           ))}

@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 // Horodatages de l'API : UTC sans fuseau, sauf generated_at (avec fuseau).
 const when = (s: string | null) =>
-  s ? new Date(/[Z+]/.test(s.slice(19)) ? s : s + "Z").toLocaleString() : "—";
+  s ? new Date(/[Z+]/.test(s.slice(19)) ? s : s + "Z").toLocaleString("fr-FR") : "—";
 const gib = (b: number | null) => (b == null ? "—" : `${(b / 2 ** 30).toFixed(1)} Gio`);
 function duration(a: string, b: string | null): string {
   if (!b) return "—";

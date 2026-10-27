@@ -2057,3 +2057,12 @@ nom : la config ne s'appliquerait pas, VM sans réseau au démarrage.
   (noyau 3.10.0-693), stockage `ok`, en 9 min 30 (émulation). C'est le
   temps ajouté à la bascule d'une VM Linux.
 - « Garder la MAC » activé dans le plan pour cette VM.
+
+### 42 ter. Affichage (27/10/2026)
+
+- Page Migration : « réseau absent » en rouge comme le stockage. La carte
+  cible FusionCompute est virtio : sans netkvm (Windows) ou virtio_net, la
+  VM démarre sans réseau.
+- Dates et nombres de toute l'interface en `fr-FR` (`toLocaleString("fr-FR")`,
+  `toLocaleTimeString("fr-FR")`) : ils suivaient la langue du navigateur
+  (10/27/2026, 12:25 PM).

@@ -107,7 +107,7 @@ export default function PlansPage() {
             <div className="modal-log">
               {deleteLog.lines.map((l, i) => (
                 <div key={i} className={l.level === "error" ? "log-error" : undefined}>
-                  {new Date(l.t).toLocaleTimeString()} {l.msg}
+                  {new Date(l.t).toLocaleTimeString("fr-FR")} {l.msg}
                 </div>
               ))}
               {deleteLog.status === "running" && <div>…</div>}
@@ -146,7 +146,7 @@ export default function PlansPage() {
               <h2 style={{ margin: 0 }}>{plan.name}</h2>
               <span className="muted">
                 {source ? source.name : plan.source_id} — créé le{" "}
-                {new Date(plan.created_at).toLocaleString()}
+                {new Date(plan.created_at).toLocaleString("fr-FR")}
               </span>
               <button
                 className="secondary"

@@ -29,7 +29,7 @@ function autoRoundStatus(job: JobOut): string {
   const last = job.rounds[job.rounds.length - 1];
   if (last && last.status === "running") {
     return `round ${last.kind} n°${last.round_no} en cours (automatique, démarré à ` +
-      `${new Date(last.started_at + "Z").toLocaleTimeString()})`;
+      `${new Date(last.started_at + "Z").toLocaleTimeString("fr-FR")})`;
   }
   if (job.state === "SEEDING") return "seed en attente du runner (démarrage automatique)";
   if (job.state === "FINAL_DELTA") return "delta final en attente du runner (démarrage automatique)";
@@ -85,11 +85,11 @@ function roundSummary(r: SyncRoundOut): string {
   const end = r.ended_at ? utc(r.ended_at) : null;
   const duration = end ? (end.getTime() - utc(r.started_at).getTime()) / 1000 : 0;
   const size = r.bytes_transferred != null
-    ? `${(r.bytes_transferred / 2 ** 20).toLocaleString(undefined, { maximumFractionDigits: 0 })} Mio écrits`
+    ? `${(r.bytes_transferred / 2 ** 20).toLocaleString("fr-FR", { maximumFractionDigits: 0 })} Mio écrits`
     : "";
   return [
     `${ROUND_KIND_LABELS[r.kind] ?? r.kind} n°${r.round_no}`,
-    end ? `terminé le ${end.toLocaleString()}` : `démarré le ${utc(r.started_at).toLocaleString()}`,
+    end ? `terminé le ${end.toLocaleString("fr-FR")}` : `démarré le ${utc(r.started_at).toLocaleString("fr-FR")}`,
     end ? (duration >= 60 ? formatDuration(duration) : `${Math.round(duration)} s`) : "",
     size,
     ROUND_STATUS_LABELS[r.status] ?? r.status,
@@ -121,7 +121,7 @@ function mibps(bps: number | null): string {
 }
 
 function iops(v: number | null): string {
-  return v == null ? "…" : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return v == null ? "…" : v.toLocaleString("fr-FR", { maximumFractionDigits: 0 });
 }
 
 // Cadre « VM relais » (27/10/2026) : charge de la VM où tournent le runner
@@ -182,12 +182,15 @@ function GuestDrivers({ job }: { job: JobOut }) {
     | undefined;
   if (!gd) return null;
   const [storage, storageCls] = VIRTIO_LABELS[gd.storage] ?? [gd.storage, ""];
-  const [network] = VIRTIO_LABELS[gd.network] ?? [gd.network, ""];
+  // réseau aussi bloquant : la carte cible FusionCompute est virtio, sans
+  // netkvm/virtio_net la VM démarre sans réseau
+  const [network, networkCls] = VIRTIO_LABELS[gd.network] ?? [gd.network, ""];
   return (
     <p className="muted" style={{ margin: "4px 0" }} title={gd.details.join("\n")}>
       Pilotes virtio{gd.product ? ` (${gd.product})` : ""} : stockage{" "}
-      <span className={`badge ${storageCls}`}>{storage}</span> — réseau {network}
-      {" "}— vérifié le {new Date(gd.inspected_at).toLocaleString()}
+      <span className={`badge ${storageCls}`}>{storage}</span> — réseau{" "}
+      <span className={`badge ${networkCls}`}>{network}</span>
+      {" "}— vérifié le {new Date(gd.inspected_at).toLocaleString("fr-FR")}
       {gd.conversion && <><br />Conversion Linux : {gd.conversion}</>}
     </p>
   );
@@ -280,7 +283,7 @@ function CutoverMonitor({ jobId, onClose }: { jobId: string; onClose: () => void
         <div className="modal-log">
           {entries.map((e) => (
             <div key={e.id} className={LOG_LEVEL_CLASS[e.level]}>
-              {new Date(e.at).toLocaleTimeString()} [{e.level}] {e.message}
+              {new Date(e.at).toLocaleTimeString("fr-FR")} [{e.level}] {e.message}
             </div>
           ))}
           {!finished && <div>…</div>}
@@ -515,7 +518,7 @@ export default function MigrationPage() {
       {runner && !runner.online && (
         <p className="error">
           Le service runner est hors ligne
-          {runner.last_seen ? ` depuis ${new Date(runner.last_seen).toLocaleString()}` : ""} : aucune
+          {runner.last_seen ? ` depuis ${new Date(runner.last_seen).toLocaleString("fr-FR")}` : ""} : aucune
           copie (seed, delta, delta final) ne peut démarrer. Sur le serveur :{" "}
           <code>docker compose up -d runner</code>, puis <code>docker compose logs runner</code>.
         </p>
@@ -647,7 +650,7 @@ export default function MigrationPage() {
                     </button>
                     {job.delta_scheduled_at && (
                       <p className="muted" style={{ margin: "4px 0 0" }}>
-                        Prochain delta : {utc(job.delta_scheduled_at).toLocaleString()}
+                        Prochain delta : {utc(job.delta_scheduled_at).toLocaleString("fr-FR")}
                       </p>
                     )}
                   </div>

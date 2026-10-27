@@ -21,7 +21,7 @@ export default function RunnerBadge() {
   if (!status) return null;
   const color = status.online ? "#4ade80" : "#f87171";
   const title = status.last_seen
-    ? `dernier signal : ${new Date(status.last_seen).toLocaleString()}`
+    ? `dernier signal : ${new Date(status.last_seen).toLocaleString("fr-FR")}`
     : "aucun signal reçu";
   return (
     <span title={title} style={{ color: "#cbd5e1", fontSize: "0.85rem" }}>
