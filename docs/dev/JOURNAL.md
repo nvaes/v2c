@@ -1917,3 +1917,34 @@ au-dessus des plans : les blocs descendaient puis remontaient à chaque
 cycle. `refresh()` ne touche plus `loading`, qui ne sert qu'au premier
 chargement (masquer « Aucun plan… » avant la première réponse) ; la ligne
 « Chargement… » est retirée. Le rafraîchissement périodique est inchangé.
+
+## 38. Delta demandé juste après le seed : 5 min d'attente (27/10/2026)
+
+Un delta demandé juste après la fin du seed restait affiché « delta demandé
+— démarrage sous 15 s » (bouton grisé) pendant 5 minutes. L'API le
+proposait bien au runner (`GET /runner/work`), mais le runner applique
+`COOLDOWN_S` (300 s) à tout nouveau round d'un job qui vient de finir —
+garde-fou ajouté après la boucle de 4 seeds du 26/10 (résultat non
+enregistré par l'API -> même état -> même round relancé).
+
+Correctif (`tools/v2fc_runner.py`) : la pause ne vaut que pour relancer le
+**même** type de round, et jamais pour un delta. Un delta ne part que sur
+demande (bouton ou heure planifiée), demande consommée par l'API au
+démarrage du round (`_consume_delta_trigger`) : il ne peut pas boucler.
+Seed -> seed et final -> final restent protégés.
+
+Même effet sur la bascule, vu juste après : delta terminé à 09:01:42,
+bascule demandée à 09:02:31 (« VM source arrêtée — prêt pour le delta
+final »), delta final retenu jusqu'à 09:06:42 — VM source éteinte pendant
+ce temps. Correctif copié dans le conteneur runner et runner redémarré
+(aucun round en cours) : delta final lancé aussitôt, bascule terminée.
+
+## 39. Popup de suivi de la bascule (27/10/2026)
+
+`Migration.tsx`, `CutoverMonitor` : popup ouvert automatiquement après
+« Migrer maintenant », et par « Suivre la bascule » / « Détail de la
+bascule » tant que le job est en CUTOVER_PENDING … CUTOVER_DONE. Affiche
+les étapes (demandée, extinction, delta final, création de la VM cible,
+terminé), l'état du runner, la barre d'avancement du round et le journal du
+job, relus toutes les 2 s (`getJob` + `getJobLogs?since=`, comme la page
+Logs). Fermer le popup n'interrompt rien.

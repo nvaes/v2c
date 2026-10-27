@@ -42,3 +42,13 @@ table.kv th { width: 230px; background: none; vertical-align: top; }
 .modal { background: white; border-radius: 6px; padding: 16px; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; }
 .modal-log { flex: 1; overflow-y: auto; min-height: 160px; background: #111827; color: #e5e7eb; font-family: ui-monospace, monospace; font-size: 12px; padding: 8px; border-radius: 4px; margin: 8px 0; }
 .modal-log .log-error { color: #fca5a5; }
+.modal-log .log-warning { color: #fcd34d; }
+
+/* Étapes de la bascule (popup de suivi, page Migration). */
+.cutover-steps { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; padding: 0; margin: 8px 0; font-size: 13px; }
+.cutover-steps li { color: #9ca3af; }
+.cutover-steps li::before { content: "○ "; }
+.cutover-steps li.done { color: #15803d; }
+.cutover-steps li.done::before { content: "✓ "; }
+.cutover-steps li.current { color: #111827; font-weight: 600; }
+.cutover-steps li.current::before { content: "● "; }

@@ -37,9 +37,12 @@ STATE_ROOT = Path(os.environ.get("V2FC_RUNNER_STATE", "/var/lib/v2fc/jobs"))
 POLL_S = float(os.environ.get("V2FC_RUNNER_POLL_S", "15"))
 MAX_PARALLEL = int(os.environ.get("V2FC_RUNNER_MAX_PARALLEL", "4"))
 TRANSPORT = os.environ.get("V2FC_RUNNER_TRANSPORT", "nbdssl")
-# Pause minimale avant de relancer un round du même job : garde-fou si
-# l'API n'enregistre pas le résultat (le job resterait dans le même état et
-# serait relancé en boucle — vu le 26/10/2026, 4 seeds de suite).
+# Pause minimale avant de relancer un round du même job et du même type :
+# garde-fou si l'API n'enregistre pas le résultat (le job resterait dans le
+# même état et serait relancé en boucle — vu le 26/10/2026, 4 seeds de
+# suite). Un round d'un autre type, ou un delta, part sans attendre
+# (27/10/2026 : un delta demandé juste après le seed restait 5 min sur
+# « démarrage sous 15 s »).
 COOLDOWN_S = float(os.environ.get("V2FC_RUNNER_COOLDOWN_S", "300"))
 
 REGISTER_EVERY_S = 600
@@ -108,7 +111,7 @@ def main() -> int:
         sys.exit("V2FC_RUNNER_TOKEN non défini — voir .env.example")
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
     running: dict[str, tuple[str, subprocess.Popen]] = {}
-    finished_at: dict[str, float] = {}
+    finished_at: dict[str, tuple[str, float]] = {}   # job -> (type de round, fin)
     registered_at = -REGISTER_EVERY_S
 
     log.info("runner démarré — API %s, %d round(s) en parallèle au plus",
@@ -123,7 +126,7 @@ def main() -> int:
             if rc is not None:
                 log.info("job %s : round %s terminé (code %s)", job_id, round_kind, rc)
                 del running[job_id]
-                finished_at[job_id] = time.monotonic()
+                finished_at[job_id] = (round_kind, time.monotonic())
 
         _heartbeat(running)
         try:
@@ -135,7 +138,11 @@ def main() -> int:
         for item in work:
             if item["job_id"] in running or len(running) >= MAX_PARALLEL:
                 continue
-            if time.monotonic() - finished_at.get(item["job_id"], -COOLDOWN_S) < COOLDOWN_S:
+            # Un delta ne part que sur demande, consommée au démarrage du
+            # round (api/routers/jobs.py) : pas de boucle possible, pas d'attente.
+            last_kind, last_end = finished_at.get(item["job_id"], ("", -COOLDOWN_S))
+            if item["round"] != "delta" and last_kind == item["round"] \
+                    and time.monotonic() - last_end < COOLDOWN_S:
                 continue
             try:
                 running[item["job_id"]] = (item["round"],

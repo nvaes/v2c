@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  api, JobOut, PlanOut, PlanVmOut, RelayOut, SyncRoundOut,
+  api, JobLogEntryOut, JobOut, PlanOut, PlanVmOut, RelayOut, SyncRoundOut,
 } from "../api";
 import { useRunnerStatus } from "../RunnerBadge";
 
@@ -116,6 +116,107 @@ function RoundHistory({ job }: { job: JobOut }) {
   );
 }
 
+// Étapes de la bascule, dans l'ordre, pour le popup de suivi.
+const CUTOVER_STEPS: [string, string][] = [
+  ["CUTOVER_PENDING", "bascule demandée"],
+  ["QUIESCING", "extinction de la VM source"],
+  ["FINAL_DELTA", "delta final"],
+  ["FINALIZING", "création de la VM cible"],
+  ["CUTOVER_DONE", "terminé"],
+];
+
+const LOG_LEVEL_CLASS: Record<string, string | undefined> = {
+  error: "log-error", warning: "log-warning",
+};
+
+// Popup de suivi de la bascule (27/10/2026) : état, avancement du delta
+// final et journal du job, relus toutes les 2 s (même source que la page
+// Logs). Fermer le popup n'interrompt rien.
+function CutoverMonitor({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [job, setJob] = useState<JobOut | null>(null);
+  const [entries, setEntries] = useState<JobLogEntryOut[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const lastAt = useRef<string | undefined>(undefined);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const [j, logs] = await Promise.all([
+          api.getJob(jobId), api.getJobLogs(jobId, lastAt.current),
+        ]);
+        if (cancelled) return;
+        setJob(j);
+        if (logs.entries.length > 0) {
+          lastAt.current = logs.entries[logs.entries.length - 1].at;
+          setEntries((prev) => [...prev, ...logs.entries]);
+        }
+        setError(null);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+    poll();
+    const t = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [jobId]);
+
+  useEffect(() => bottomRef.current?.scrollIntoView({ block: "end" }), [entries.length]);
+
+  const stepIndex = job ? CUTOVER_STEPS.findIndex(([s]) => s === job.state) : -1;
+  const finished = job?.state === "CUTOVER_DONE";
+  const status = job && job.relay_id ? autoRoundStatus(job) : "";
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2 style={{ margin: 0 }}>Bascule — {job?.src_vm_name ?? "…"}</h2>
+        <ol className="cutover-steps">
+          {CUTOVER_STEPS.map(([state, label], i) => (
+            <li
+              key={state}
+              className={
+                i < stepIndex || finished ? "done" : i === stepIndex ? "current" : undefined
+              }
+            >
+              {label}
+            </li>
+          ))}
+        </ol>
+        {job && stepIndex < 0 && (
+          <p className="muted" style={{ margin: "4px 0" }}>
+            État : <span className="badge">{STATE_LABELS[job.state] ?? job.state}</span>
+          </p>
+        )}
+        {job?.state === "FINALIZING" && !job.rounds.some((r) => r.status === "running") && (
+          <p className="muted" style={{ margin: "4px 0" }}>
+            Si rien n'avance, la finalisation a pu s'interrompre : voir le journal ci-dessous.
+          </p>
+        )}
+        {status && <p className="muted" style={{ margin: "4px 0" }}>{status}</p>}
+        {job && <RoundProgress job={job} />}
+        {error && <p className="error">{error}</p>}
+        <div className="modal-log">
+          {entries.map((e) => (
+            <div key={e.id} className={LOG_LEVEL_CLASS[e.level]}>
+              {new Date(e.at).toLocaleTimeString()} [{e.level}] {e.message}
+            </div>
+          ))}
+          {!finished && <div>…</div>}
+          <div ref={bottomRef} />
+        </div>
+        <button style={{ alignSelf: "flex-end" }} onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function jobRunCommand(job: JobOut, kind: "seed" | "delta" | "final"): string {
   return (
     `V2FC_API_TOKEN=<jeton> docker run --rm --platform linux/amd64 \\\n` +
@@ -145,6 +246,8 @@ export default function MigrationPage() {
   const [relayChoice, setRelayChoice] = useState<Record<string, string>>({});
   // Action globale en cours sur un plan (premier seed, planification).
   const [planProgress, setPlanProgress] = useState<Record<string, string>>({});
+  // Job dont la bascule est suivie dans le popup.
+  const [monitorJobId, setMonitorJobId] = useState<string | null>(null);
 
   // Rafraîchissement silencieux (27/10/2026) : `loading` ne vaut true qu'au
   // premier chargement — afficher « Chargement… » toutes les 5 s décalait
@@ -266,6 +369,7 @@ export default function MigrationPage() {
     setError(null);
     try {
       await api.cutoverJob(jobId, autoRestart[jobId] ?? false);
+      setMonitorJobId(jobId);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -340,6 +444,9 @@ export default function MigrationPage() {
         </p>
       )}
       {error && <p className="error">{error}</p>}
+      {monitorJobId && (
+        <CutoverMonitor jobId={monitorJobId} onClose={() => setMonitorJobId(null)} />
+      )}
 
       {!loading && plans.filter((p) => p.target_id).length === 0 && (
         <p className="muted">
@@ -499,6 +606,13 @@ export default function MigrationPage() {
                 {job && ["CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA", "FINALIZING", "CUTOVER_DONE"]
                   .includes(job.state) && (
                   <p>
+                    <button
+                      className="secondary"
+                      style={{ marginRight: 8 }}
+                      onClick={() => setMonitorJobId(job.id)}
+                    >
+                      {job.state === "CUTOVER_DONE" ? "Détail de la bascule" : "Suivre la bascule"}
+                    </button>
                     <button className="secondary" disabled={busyKey === job.id} onClick={() => rollback(job.id)}>
                       {busyKey === job.id ? "…" : "Annuler / rollback"}
                     </button>
