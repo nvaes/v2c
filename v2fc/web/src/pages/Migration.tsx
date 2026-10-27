@@ -165,6 +165,33 @@ function RelayResources({ metrics }: { metrics: RelayMetrics }) {
   );
 }
 
+const VIRTIO_LABELS: Record<string, [string, string]> = {
+  ok: ["présents", "ok"],
+  inactive: ["présents, pas chargés au démarrage", "blocked"],
+  absent: ["absents", "blocked"],
+  unknown: ["non déterminés", ""],
+};
+
+// Pilotes virtio de l'OS copié, relus par job-run après chaque round réussi
+// (datamover/guest_drivers.py) : sans pilote de stockage chargé au démarrage,
+// la VM cible doit démarrer sur IDE.
+function GuestDrivers({ job }: { job: JobOut }) {
+  const gd = job.spec?.guest_drivers as
+    | { os: string | null; product: string | null; storage: string; network: string;
+        details: string[]; inspected_at: string }
+    | undefined;
+  if (!gd) return null;
+  const [storage, storageCls] = VIRTIO_LABELS[gd.storage] ?? [gd.storage, ""];
+  const [network] = VIRTIO_LABELS[gd.network] ?? [gd.network, ""];
+  return (
+    <p className="muted" style={{ margin: "4px 0" }} title={gd.details.join("\n")}>
+      Pilotes virtio{gd.product ? ` (${gd.product})` : ""} : stockage{" "}
+      <span className={`badge ${storageCls}`}>{storage}</span> — réseau {network}
+      {" "}— vérifié le {new Date(gd.inspected_at).toLocaleString()}
+    </p>
+  );
+}
+
 // Étapes de la bascule, dans l'ordre, pour le popup de suivi.
 const CUTOVER_STEPS: [string, string][] = [
   ["CUTOVER_PENDING", "bascule demandée"],
@@ -595,6 +622,7 @@ export default function MigrationPage() {
 
                 {job && <RoundProgress job={job} />}
                 {job && <RoundHistory job={job} />}
+                {job && <GuestDrivers job={job} />}
 
                 {job && !job.relay_id && ROUND_KIND_FOR_STATE[job.state] && (
                   <div>

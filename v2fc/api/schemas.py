@@ -457,6 +457,9 @@ class JobRoundReport(BaseModel):
     bytes_skipped: int | None = None
     error: str | None = None
     disks: list[DiskRoundReport] = Field(default_factory=list)
+    # Pilotes virtio de l'OS copié (datamover/guest_drivers.py), après un
+    # round réussi sur des volumes FusionCompute.
+    guest_drivers: dict | None = None
 
 
 class JobCutoverRequest(BaseModel):

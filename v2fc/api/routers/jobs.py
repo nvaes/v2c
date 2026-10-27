@@ -475,6 +475,12 @@ async def report_round(job_id: uuid.UUID, round_id: uuid.UUID, body: JobRoundRep
                   "error" if body.status == "failed" else "info")
     if body.error:
         await _log(db, job.id, f"erreur : {body.error}", "error")
+    if body.guest_drivers is not None:
+        # nouveau dict : une mutation en place de la colonne JSON ne serait
+        # pas vue par SQLAlchemy
+        job.spec = {**(job.spec or {}), "guest_drivers": body.guest_drivers}
+        await _log(db, job.id, _guest_drivers_summary(body.guest_drivers),
+                   "info" if body.guest_drivers.get("storage") == "ok" else "warning")
 
     for d in body.disks:
         job_disk = (await db.execute(
@@ -508,6 +514,18 @@ async def report_round(job_id: uuid.UUID, round_id: uuid.UUID, body: JobRoundRep
 
     await db.commit()
     return await _load_job_full(db, job.id)
+
+
+_DRIVER_LABELS = {"ok": "présent", "inactive": "présent mais pas chargé au démarrage",
+                  "absent": "absent", "unknown": "non déterminé"}
+
+
+def _guest_drivers_summary(gd: dict) -> str:
+    details = "; ".join(gd.get("details") or [])
+    return (f"pilotes virtio ({gd.get('product') or gd.get('os') or 'OS inconnu'}) : "
+            f"stockage {_DRIVER_LABELS.get(gd.get('storage'), gd.get('storage'))}, "
+            f"réseau {_DRIVER_LABELS.get(gd.get('network'), gd.get('network'))}"
+            + (f" — {details}" if details else ""))
 
 
 async def _finalize(db: AsyncSession, job: Job) -> None:

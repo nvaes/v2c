@@ -21,8 +21,13 @@
 # FromPlatformFlagConstDisallowed et casse les builds multi-architecture.
 FROM debian:12-slim
 
+# libguestfs + noyau : inspection hors ligne de l'OS copié sur les volumes
+# cibles (pilotes virtio, datamover/guest_drivers.py). Pas de /dev/kvm sur le
+# relais : appliance en émulation (LIBGUESTFS_BACKEND=direct, ~30 s).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      python3 python3-pip ca-certificates \
+      libguestfs-tools python3-guestfs linux-image-amd64 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-dev.txt /tmp/
@@ -36,6 +41,7 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements-dev
 ENV VDDK_DISTRIB=/opt/vddk \
     LD_LIBRARY_PATH=/opt/vddk/lib64 \
     PYTHONUNBUFFERED=1 \
+    LIBGUESTFS_BACKEND=direct \
     PYTHONPATH=/work
 
 WORKDIR /work

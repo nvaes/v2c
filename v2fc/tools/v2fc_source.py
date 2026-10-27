@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import requests
 
 from datamover import extents as ex
+from datamover import guest_drivers
 from datamover import vddk
 from datamover.preflight import Severity, run_preflight
 from datamover.vsphere import (SNAPSHOT_PREFIX, CbtInvalidated, VSphereClient,
@@ -564,6 +565,11 @@ def cmd_job_run(args) -> int:
     report = {"status": status_, "duration_s": stats.get("duration"),
              "bytes_written": stats.get("written"), "bytes_skipped": stats.get("skipped"),
              "error": error_msg, "disks": disks_report}
+    # Pilotes virtio de l'OS copié (27/10/2026) : relus après chaque round
+    # réussi, la VM source a pu en recevoir entre deux deltas.
+    if status_ == "success" and volumes:
+        report["guest_drivers"] = guest_drivers.inspect(
+            [volumes[k][0] for k in sorted(volumes)])
     patch_resp = requests.patch(
         f"{api_url}/api/v1/jobs/{args.job_id}/rounds/{ctx['round_id']}",
         json=report, headers=headers, timeout=30)
