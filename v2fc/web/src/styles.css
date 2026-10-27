@@ -52,3 +52,8 @@ table.kv th { width: 230px; background: none; vertical-align: top; }
 .cutover-steps li.done::before { content: "✓ "; }
 .cutover-steps li.current { color: #111827; font-weight: 600; }
 .cutover-steps li.current::before { content: "● "; }
+
+/* Cadre « Ressources de la VM relais » (page Migration) */
+.resource-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.resource-tile { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; }
+.resource-tile strong { display: block; font-size: 1.1rem; margin: 2px 0; }

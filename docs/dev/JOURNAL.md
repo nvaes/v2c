@@ -1960,3 +1960,27 @@ Correctif (`v2fc/docker-compose.yml`) : `restart: unless-stopped` sur tous
 les services. Le démon Docker est déjà activé au boot par
 `install/install-docker.sh` (`systemctl enable --now docker`), il relance
 donc la pile complète. Un `docker compose stop` volontaire reste respecté.
+
+## 41. Cadre « Ressources de la VM relais » sur la page Migration (27/10/2026)
+
+Demande : voir en direct CPU, RAM, réseau et IOPS disque de la VM relais
+(celle où tournent le runner et les copies).
+
+- `tools/relay_metrics.py` : le runner lit `/proc/stat`, `/proc/meminfo`,
+  `/proc/net/dev` et `/proc/diskstats` à chaque pouls (15 s) et calcule les
+  moyennes entre deux pouls (rien au premier). Disques : périphériques
+  entiers de `/sys/block` (partitions, loop, sr, dm exclus) — le disque
+  système et les volumes FusionCompute attachés.
+- Limite assumée : le conteneur runner a son propre espace réseau, le
+  réseau mesuré est donc le trafic du conteneur (lecture VDDK des copies),
+  pas celui de toute la VM. CPU, RAM et disques valent pour toute la VM.
+- Pouls (`POST /runner/heartbeat`) : champ `metrics` facultatif, renvoyé
+  par `GET /runner/status` tant que le runner est en ligne. Compatible dans
+  les deux sens (ancien runner : `metrics` absent, cadre masqué).
+- `Migration.tsx`, `RelayResources` : quatre tuiles sous l'en-tête de la
+  page, rafraîchies avec l'état du runner (`useRunnerStatus`, 15 s).
+- Test : `tests/test_relay_metrics.py` (faux /proc).
+
+Déploiement : reconstruire `api` et `runner` (code copié dans les images)
+uniquement quand aucun round n'est `running` dans `sync_rounds` —
+redémarrer le runner interrompt les `job-run` en cours.

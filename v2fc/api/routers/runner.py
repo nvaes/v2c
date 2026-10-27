@@ -145,6 +145,7 @@ async def heartbeat(body: RunnerHeartbeat, _runner: User = Depends(require_runne
     await set_runner_heartbeat({
         "at": datetime.now(timezone.utc).isoformat(),
         "running": [{"job_id": str(r.job_id), "round": r.round} for r in body.running],
+        "metrics": body.metrics.model_dump() if body.metrics else None,
     })
 
 
@@ -167,4 +168,5 @@ async def runner_status(db: AsyncSession = Depends(get_db),
         if changed:
             await db.commit()
     return {"online": online, "last_seen": last_seen,
-            "running": beat["running"] if beat and online else [], "relays": relays}
+            "running": beat["running"] if beat and online else [],
+            "metrics": beat.get("metrics") if beat and online else None, "relays": relays}

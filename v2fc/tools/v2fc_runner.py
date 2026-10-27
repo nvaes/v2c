@@ -29,6 +29,8 @@ from pathlib import Path
 
 import requests
 
+from relay_metrics import RelayMetrics
+
 log = logging.getLogger("v2fc.runner")
 
 API_URL = os.environ.get("V2FC_API_URL", "http://api:8000").rstrip("/")
@@ -82,11 +84,18 @@ def _register() -> bool:
     return True
 
 
-def _heartbeat(running: dict) -> None:
-    """Pouls pour l'interface (état du runner, rounds en cours) — best-effort."""
+def _heartbeat(running: dict, metrics: RelayMetrics) -> None:
+    """Pouls pour l'interface (état du runner, rounds en cours, charge de la
+    VM relais) — best-effort."""
+    try:
+        sample = metrics.sample()
+    except (OSError, ValueError, IndexError) as exc:
+        log.warning("mesures de la VM relais illisibles : %s", exc)
+        sample = None
     try:
         requests.post(f"{API_URL}/api/v1/runner/heartbeat", timeout=10,
-                      json={"running": [{"job_id": j, "round": r} for j, (r, _) in running.items()]},
+                      json={"running": [{"job_id": j, "round": r} for j, (r, _) in running.items()],
+                            "metrics": sample},
                       headers={"Authorization": f"Bearer {TOKEN}"})
     except requests.RequestException:
         pass
@@ -113,6 +122,7 @@ def main() -> int:
     running: dict[str, tuple[str, subprocess.Popen]] = {}
     finished_at: dict[str, tuple[str, float]] = {}   # job -> (type de round, fin)
     registered_at = -REGISTER_EVERY_S
+    metrics = RelayMetrics()
 
     log.info("runner démarré — API %s, %d round(s) en parallèle au plus",
              API_URL, MAX_PARALLEL)
@@ -128,7 +138,7 @@ def main() -> int:
                 del running[job_id]
                 finished_at[job_id] = (round_kind, time.monotonic())
 
-        _heartbeat(running)
+        _heartbeat(running, metrics)
         try:
             work = _get("/api/v1/runner/work").json()
         except requests.RequestException as exc:

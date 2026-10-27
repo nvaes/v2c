@@ -194,6 +194,15 @@ export interface InventoryProgress { phase: "idle" | "connecting" | "preflight" 
 export interface RunnerStatus {
   online: boolean; last_seen: string | null;
   running: { job_id: string; round: string }[]; relays: RelayOut[];
+  metrics: RelayMetrics | null;
+}
+// Charge de la VM relais, mesurée par le runner (débits : null au 1er pouls).
+export interface RelayMetrics {
+  cpu_count: number; cpu_percent: number | null;
+  mem_total_mb: number; mem_used_mb: number;
+  net_rx_bps: number | null; net_tx_bps: number | null;
+  disk_read_iops: number | null; disk_write_iops: number | null;
+  disk_read_bps: number | null; disk_write_bps: number | null;
 }
 
 export interface PlanReport {

@@ -388,14 +388,31 @@ class RunnerRound(BaseModel):
     round: str
 
 
+class RelayMetrics(BaseModel):
+    """Charge de la VM relais mesurée par le runner (tools/relay_metrics.py) ;
+    débits moyennés entre deux pouls, None au premier pouls."""
+    cpu_count: int
+    cpu_percent: float | None = None
+    mem_total_mb: int
+    mem_used_mb: int
+    net_rx_bps: float | None = None
+    net_tx_bps: float | None = None
+    disk_read_iops: float | None = None
+    disk_write_iops: float | None = None
+    disk_read_bps: float | None = None
+    disk_write_bps: float | None = None
+
+
 class RunnerHeartbeat(BaseModel):
     running: list[RunnerRound] = Field(default_factory=list)
+    metrics: RelayMetrics | None = None
 
 
 class RunnerStatus(BaseModel):
     online: bool
     last_seen: datetime | None
     running: list[RunnerRound]
+    metrics: RelayMetrics | None = None
     relays: list["RelayOut"]
 
 

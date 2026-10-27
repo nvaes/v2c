@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  api, JobLogEntryOut, JobOut, PlanOut, PlanVmOut, RelayOut, SyncRoundOut,
+  api, JobLogEntryOut, JobOut, PlanOut, PlanVmOut, RelayMetrics, RelayOut, SyncRoundOut,
 } from "../api";
 import { useRunnerStatus } from "../RunnerBadge";
 
@@ -112,6 +112,55 @@ function RoundHistory({ job }: { job: JobOut }) {
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+function mibps(bps: number | null): string {
+  return bps == null ? "…" : `${(bps / 2 ** 20).toFixed(1)} Mio/s`;
+}
+
+function iops(v: number | null): string {
+  return v == null ? "…" : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+// Cadre « VM relais » (27/10/2026) : charge de la VM où tournent le runner
+// et les copies, mesurée par le runner et jointe à son pouls (15 s).
+function RelayResources({ metrics }: { metrics: RelayMetrics }) {
+  const memPct = metrics.mem_total_mb > 0 ? (100 * metrics.mem_used_mb) / metrics.mem_total_mb : 0;
+  const gib = (mb: number) => (mb / 1024).toFixed(1);
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Ressources de la VM relais</h2>
+      <div className="resource-grid">
+        <div className="resource-tile">
+          <div className="muted">CPU ({metrics.cpu_count} vCPU)</div>
+          <strong>{metrics.cpu_percent == null ? "…" : `${metrics.cpu_percent.toFixed(0)} %`}</strong>
+          <div className="progress"><div style={{ width: `${metrics.cpu_percent ?? 0}%` }} /></div>
+        </div>
+        <div className="resource-tile">
+          <div className="muted">RAM</div>
+          <strong>{gib(metrics.mem_used_mb)} / {gib(metrics.mem_total_mb)} Gio</strong>
+          <div className="progress"><div style={{ width: `${memPct}%` }} /></div>
+        </div>
+        <div className="resource-tile">
+          <div className="muted">Réseau (copies)</div>
+          <strong>↓ {mibps(metrics.net_rx_bps)}</strong>
+          <div>↑ {mibps(metrics.net_tx_bps)}</div>
+        </div>
+        <div className="resource-tile">
+          <div className="muted">Disques — IOPS</div>
+          <strong>
+            {iops(metrics.disk_read_iops)} lect. / {iops(metrics.disk_write_iops)} écr.
+          </strong>
+          <div className="muted">
+            {mibps(metrics.disk_read_bps)} lus — {mibps(metrics.disk_write_bps)} écrits
+          </div>
+        </div>
+      </div>
+      <p className="muted" style={{ margin: "8px 0 0" }}>
+        Moyennes sur les 15 dernières secondes, mesurées par le runner.
+      </p>
     </div>
   );
 }
@@ -443,6 +492,7 @@ export default function MigrationPage() {
           <code>docker compose up -d runner</code>, puis <code>docker compose logs runner</code>.
         </p>
       )}
+      {runner?.online && runner.metrics && <RelayResources metrics={runner.metrics} />}
       {error && <p className="error">{error}</p>}
       {monitorJobId && (
         <CutoverMonitor jobId={monitorJobId} onClose={() => setMonitorJobId(null)} />
