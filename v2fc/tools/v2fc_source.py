@@ -568,8 +568,19 @@ def cmd_job_run(args) -> int:
     # Pilotes virtio de l'OS copié (27/10/2026) : relus après chaque round
     # réussi, la VM source a pu en recevoir entre deux deltas.
     if status_ == "success" and volumes:
-        report["guest_drivers"] = guest_drivers.inspect(
-            [volumes[k][0] for k in sorted(volumes)])
+        devices = [volumes[k][0] for k in sorted(volumes)]
+        gd = guest_drivers.inspect(devices)
+        # Delta final (VM source arrêtée, volumes cohérents) : une VM Linux
+        # sans virtio à l'initramfs est convertie sur les volumes cibles, pour
+        # démarrer en VIRTIO. Windows : pas de conversion (pilotes à installer
+        # dans la VM source). V2FC_CONVERT_LINUX=0 pour désactiver.
+        if (ctx["round_kind"] == "FINAL" and gd["os"] == "linux" and gd["storage"] != "ok"
+                and os.environ.get("V2FC_CONVERT_LINUX", "1") != "0"):
+            conversion = guest_drivers.convert_linux(devices)
+            if conversion["converted"]:
+                gd = conversion["guest_drivers"]
+            gd["conversion"] = conversion["message"]
+        report["guest_drivers"] = gd
     patch_resp = requests.patch(
         f"{api_url}/api/v1/jobs/{args.job_id}/rounds/{ctx['round_id']}",
         json=report, headers=headers, timeout=30)

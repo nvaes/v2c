@@ -522,7 +522,8 @@ _DRIVER_LABELS = {"ok": "présent", "inactive": "présent mais pas chargé au d�
 
 def _guest_drivers_summary(gd: dict) -> str:
     details = "; ".join(gd.get("details") or [])
-    return (f"pilotes virtio ({gd.get('product') or gd.get('os') or 'OS inconnu'}) : "
+    return ((f"conversion Linux : {gd['conversion']}. " if gd.get("conversion") else "")
+            + f"pilotes virtio ({gd.get('product') or gd.get('os') or 'OS inconnu'}) : "
             f"stockage {_DRIVER_LABELS.get(gd.get('storage'), gd.get('storage'))}, "
             f"réseau {_DRIVER_LABELS.get(gd.get('network'), gd.get('network'))}"
             + (f" — {details}" if details else ""))
@@ -603,14 +604,15 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
             tgt_vm_id = job.tgt_vm_uri.rstrip("/").rsplit("/", 1)[-1]
 
             on_target = {d["volumeUrn"] for d in fc_client.get_vm(tgt_vm_id)["vmConfig"]["disks"]}
+            virtio = _virtio_ready(job)
             for i, jd in enumerate(d for d in disks if d.tgt_volume_uri):
                 if vol_urn(jd) in on_target:
                     continue
-                pci = _TARGET_PCI_TYPE if i < _IDE_SLOTS else "VIRTIO"
+                pci = "VIRTIO" if virtio or i >= _IDE_SLOTS else _TARGET_PCI_TYPE
                 resp = fc_client.attach_volume(tgt_vm_id, vol_urn=vol_urn(jd), pci_type=pci)
                 fc_client.wait_task(resp["taskUri"])
                 await _log(db, job.id, f"volume {vol_urn(jd)} attaché à la VM cible ({pci})")
-            if len(disks) > _IDE_SLOTS:
+            if not virtio and len(disks) > _IDE_SLOTS:
                 await _log(db, job.id,
                            f"disques au-delà du {_IDE_SLOTS}e attachés en VIRTIO : visibles une "
                            f"fois les outils FusionCompute installés dans la VM", "warning")
@@ -624,9 +626,13 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
         return
 
     _set_state(job, "CUTOVER_DONE")
-    await _log(db, job.id, "bascule terminée — VM cible créée sur FusionCompute. Disques en "
-                           "IDE : installer les outils FusionCompute dans la VM avant de les "
-                           "passer en VIRTIO (performances)")
+    if _virtio_ready(job):
+        await _log(db, job.id, "bascule terminée — VM cible créée sur FusionCompute, disques "
+                               "en VIRTIO (pilotes virtio présents dans l'OS copié)")
+    else:
+        await _log(db, job.id, "bascule terminée — VM cible créée sur FusionCompute. Disques en "
+                               "IDE : installer les outils FusionCompute dans la VM avant de les "
+                               "passer en VIRTIO (performances)")
 
 
 def _target_nics(plan_vm: PlanVm | None) -> list[dict]:
@@ -649,6 +655,13 @@ def _target_nics(plan_vm: PlanVm | None) -> list[dict]:
 # pilote, mais FusionCompute n'en propose que 3 emplacements.
 _TARGET_PCI_TYPE = "IDE"
 _IDE_SLOTS = 3
+
+
+def _virtio_ready(job: Job) -> bool:
+    """Pilote virtio de stockage chargé au démarrage de l'OS copié, d'après
+    la dernière inspection de job-run (après le delta final, conversion Linux
+    comprise) : tous les disques peuvent alors être attachés en VIRTIO."""
+    return ((job.spec or {}).get("guest_drivers") or {}).get("storage") == "ok"
 
 
 def _source_hardware(src_args: dict, instance_uuid: str) -> dict:

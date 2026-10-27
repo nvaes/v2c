@@ -1984,3 +1984,51 @@ Demande : voir en direct CPU, RAM, réseau et IOPS disque de la VM relais
 Déploiement : reconstruire `api` et `runner` (code copié dans les images)
 uniquement quand aucun round n'est `running` dans `sync_rounds` —
 redémarrer le runner interrompt les `job-run` en cours.
+
+## 42. Pilotes virtio : détection, et conversion des VM Linux (27/10/2026)
+
+Jusqu'ici, la finalisation attachait les 3 premiers disques de la VM cible
+en IDE, par principe : une VM venue de VMware n'a pas de pilote virtio
+(INACCESSIBLE_BOOT_DEVICE sous Windows, racine introuvable sous Linux).
+
+**Détection** (`datamover/guest_drivers.py`, `inspect`) : après chaque round
+réussi, `job-run` inspecte l'OS copié sur les volumes cibles attachés au
+relais, en lecture seule, avec libguestfs. Le relais n'a pas de `/dev/kvm`,
+donc l'appliance tourne en émulation (TCG, ~30 s).
+- Windows : `viostor`/`vioscsi` dans `System32\drivers` et dans la ruche
+  SYSTEM (`Services\<pilote>\Start`, 0 = chargé au démarrage), DriverStore
+  pour les pilotes seulement préinstallés ; `netkvm` pour le réseau.
+- Linux : noyau le plus récent de `/lib/modules` (tri numérique : `553.el8`
+  < `553.179.1.el8`), `virtio_blk`/`virtio_scsi` intégrés au noyau ou
+  **présents comme fichiers** dans l'initramfs. Chercher le texte dans
+  l'archive décompressée donnait un faux positif (modules.dep cite des
+  modules absents) : on lit les noms des fichiers des archives cpio
+  (microcode non compressé, puis gzip/xz/zstd/lz4).
+- Copie prise à chaud : XFS/ext4 montés sans rejouer le journal
+  (`norecovery` / `noload`).
+- Résultat dans `jobs.spec.guest_drivers` (stockage `ok` / `inactive` /
+  `absent` / `unknown`), affiché sur la page Migration et dans les logs.
+
+**Conversion Linux** (`convert_linux`) : au delta final (VM source
+arrêtée), si le stockage virtio n'est pas `ok`, l'initramfs du noyau par
+défaut est reconstruit **sur les volumes cibles** : `dracut -f
+--no-hostonly` (sinon dracut prendrait le matériel de l'appliance), et
+`/etc/dracut.conf.d/90-v2fc-virtio.conf` pour les futurs noyaux ; ou
+`update-initramfs` + `/etc/initramfs-tools/modules` sur Debian/Ubuntu.
+La VM est refusée si fstab/GRUB nomment un disque `/dev/sdX`, qui
+s'appellera `/dev/vdX`. `V2FC_CONVERT_LINUX=0` (environnement du runner)
+désactive la conversion. Testé sur une image AlmaLinux 8 dont l'initramfs
+n'avait pas virtio : avant `inactive`, conversion en ~4 min (émulation),
+après `ok`.
+
+**Finalisation** : si `guest_drivers.storage == "ok"`, tous les disques
+sont attachés en VIRTIO ; sinon IDE pour les 3 premiers, comme avant.
+Windows sans pilotes : pas de conversion (il faudrait l'ISO virtio-win et
+virt-v2v ; à étudier).
+
+Non traité : les noms d'interfaces réseau changent (ens192 -> ens3...), et
+une config réseau liée au nom d'interface plutôt qu'à la MAC peut ne pas
+s'appliquer au premier démarrage.
+
+Image runner : libguestfs-tools, python3-guestfs et linux-image-amd64
+(+1,2 Go environ).

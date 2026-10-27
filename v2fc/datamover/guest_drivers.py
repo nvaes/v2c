@@ -45,46 +45,67 @@ _LINUX_STORAGE = ("virtio_blk", "virtio_scsi")
 _LINUX_NETWORK = ("virtio_net",)
 
 
+def _new_result() -> dict:
+    return {"os": None, "product": None, "storage": "unknown", "network": "unknown",
+            "details": [], "inspected_at": datetime.now(timezone.utc).isoformat()}
+
+
+def _launch(devices: list[str], readonly: bool):
+    """Appliance libguestfs sur les disques de la VM, OS détecté. `readonly`
+    : écritures dans une surcouche temporaire jetée à la fermeture."""
+    import guestfs
+    g = guestfs.GuestFS(python_return_dict=True)
+    g.set_memsize(2048)           # dracut --no-hostonly sous émulation
+    for dev in devices:
+        g.add_drive_opts(dev, readonly=1 if readonly else 0, format="raw")
+    g.launch()
+    roots = g.inspect_os()
+    return g, (roots[0] if roots else None)
+
+
+def _close(g) -> None:
+    try:
+        g.shutdown()
+    except RuntimeError:
+        pass
+    g.close()
+
+
+def _inspect_mounted(g, root: str, result: dict) -> None:
+    result["os"] = g.inspect_get_type(root)
+    result["product"] = g.inspect_get_product_name(root)
+    if result["os"] == "windows":
+        _windows(g, root, result)
+    elif result["os"] == "linux":
+        _linux(g, result)
+    else:
+        result["details"].append(f"OS {result['os']} non pris en charge")
+
+
 def inspect(devices: list[str]) -> dict:
     """Inspecte les disques d'une VM (tous, dans l'ordre : un volume LVM peut
     s'étendre sur plusieurs). Ne lève pas : `unknown` avec la raison."""
-    result = {"os": None, "product": None, "storage": "unknown", "network": "unknown",
-              "details": [], "inspected_at": datetime.now(timezone.utc).isoformat()}
+    result = _new_result()
     try:
-        import guestfs
+        g, root = _launch(devices, readonly=True)
     except ImportError:
         result["details"].append("libguestfs absent de l'image du runner")
         return result
-
-    g = guestfs.GuestFS(python_return_dict=True)
+    except RuntimeError as exc:
+        result["details"].append(f"inspection impossible : {exc}")
+        return result
     try:
-        for dev in devices:
-            g.add_drive_opts(dev, readonly=1, format="raw")
-        g.launch()
-        roots = g.inspect_os()
-        if not roots:
+        if root is None:
             result["details"].append("aucun système d'exploitation trouvé sur les disques")
             return result
-        root = roots[0]
-        result["os"] = g.inspect_get_type(root)
-        result["product"] = g.inspect_get_product_name(root)
         mounts = g.inspect_get_mountpoints(root)
         for mp in sorted(mounts, key=len):
             _mount_ro(g, mounts[mp], mp, result)
-        if result["os"] == "windows":
-            _windows(g, root, result)
-        elif result["os"] == "linux":
-            _linux(g, result)
-        else:
-            result["details"].append(f"OS {result['os']} non pris en charge")
+        _inspect_mounted(g, root, result)
     except RuntimeError as exc:
         result["details"].append(f"inspection impossible : {exc}")
     finally:
-        try:
-            g.shutdown()
-        except RuntimeError:
-            pass
-        g.close()
+        _close(g)
     return result
 
 
@@ -187,16 +208,27 @@ def _version_key(v: str) -> list[int]:
     return [int(n) for n in re.findall(r"\d+", v)]
 
 
-def _linux(g, result: dict) -> None:
+def _default_kernel(g) -> tuple[str | None, str | None]:
+    """Noyau le plus récent (celui que GRUB démarre par défaut) et son
+    initramfs, s'il existe."""
     try:
         kernels = sorted((k for k in g.ls("/lib/modules") if g.is_dir(f"/lib/modules/{k}")),
                          key=_version_key)
     except RuntimeError:
         kernels = []
     if not kernels:
+        return None, None
+    kernel = kernels[-1]
+    initrd = next((p for p in (f"/boot/initramfs-{kernel}.img", f"/boot/initrd.img-{kernel}",
+                               f"/boot/initrd-{kernel}") if g.is_file(p)), None)
+    return kernel, initrd
+
+
+def _linux(g, result: dict) -> None:
+    kernel, initrd = _default_kernel(g)
+    if kernel is None:
         result["details"].append("aucun noyau dans /lib/modules")
         return
-    kernel = kernels[-1]          # le plus récent : celui que GRUB démarre par défaut
     base = f"/lib/modules/{kernel}"
     builtin = set()
     if g.is_file(f"{base}/modules.builtin"):
@@ -207,12 +239,10 @@ def _linux(g, result: dict) -> None:
         for line in g.cat(f"{base}/modules.dep").splitlines():
             on_disk.add(line.split(":", 1)[0].rsplit("/", 1)[-1].split(".ko")[0])
 
-    initrd = next((p for p in (f"/boot/initramfs-{kernel}.img", f"/boot/initrd.img-{kernel}",
-                               f"/boot/initrd-{kernel}") if g.is_file(p)), None)
     initrd_names = None
     if initrd:
         try:
-            initrd_names = _initrd_text(g.read_file(initrd))
+            initrd_names = _initrd_modules(g.read_file(initrd))
         except (OSError, ValueError, RuntimeError) as exc:
             result["details"].append(f"initramfs illisible ({initrd}) : {exc}")
     else:
@@ -224,7 +254,7 @@ def _linux(g, result: dict) -> None:
             storage = "ok"
             result["details"].append(f"{name} intégré au noyau {kernel}")
         elif name in on_disk:
-            in_initrd = initrd_names is not None and f"{name}.ko".encode() in initrd_names
+            in_initrd = initrd_names is not None and name in initrd_names
             if in_initrd:
                 storage = "ok"
             elif storage != "ok":
@@ -239,17 +269,100 @@ def _linux(g, result: dict) -> None:
     result["network"] = "ok" if net else "absent"
 
 
-def _initrd_text(data: bytes) -> bytes:
+# -- Conversion Linux --------------------------------------------------------
+# Pilotes ajoutés à l'initramfs : stockage (virtio-blk = type VIRTIO de
+# FusionCompute, virtio-scsi) et le bus PCI virtio dont ils dépendent ; le
+# réseau se charge après le démarrage, depuis la racine.
+_LINUX_INITRD_DRIVERS = "virtio_blk virtio_scsi virtio_pci virtio_net"
+_DRACUT_CONF = "/etc/dracut.conf.d/90-v2fc-virtio.conf"
+# Noms de disques qui changent avec virtio-blk (/dev/sdX -> /dev/vdX).
+_DISK_NAME_RE = re.compile(r"/dev/(sd|hd)[a-z]")
+
+
+def convert_linux(devices: list[str], readonly: bool = False) -> dict:
     """
-    Contenu décompressé d'un initramfs, pour y chercher des noms de modules.
-    dracut et initramfs-tools préfixent souvent une archive cpio non
-    compressée (microcode) avant l'archive principale compressée : on saute
-    les archives cpio « newc » non compressées puis on décompresse la suite.
+    Ajoute les pilotes virtio à l'initramfs du noyau par défaut d'une VM
+    Linux copiée (après le delta final : VM source arrêtée, volumes cohérents),
+    pour qu'elle démarre sur des disques VIRTIO. Écrit sur les volumes cibles
+    seulement — jamais sur la source. `readonly` : essai dans une surcouche
+    jetée (tests).
+
+    Renvoie {"converted": bool, "message": str, "guest_drivers": inspection
+    après coup}. Refuse (converted=False) si l'OS n'est pas Linux, si fstab ou
+    la ligne de commande du noyau nomment un disque /dev/sdX, ou si aucun
+    outil d'initramfs connu n'est présent.
     """
-    out = bytearray()
-    pos = 0
+    out = {"converted": False, "message": "", "guest_drivers": _new_result()}
+    try:
+        g, root = _launch(devices, readonly=readonly)
+    except (ImportError, RuntimeError) as exc:
+        out["message"] = f"conversion impossible : {exc}"
+        return out
+    try:
+        if root is None or g.inspect_get_type(root) != "linux":
+            out["message"] = "pas de système Linux sur les disques : rien à convertir"
+            return out
+        mounts = g.inspect_get_mountpoints(root)
+        for mp in sorted(mounts, key=len):
+            g.mount(mounts[mp], mp)
+
+        by_name = [f for f in ("/etc/fstab", "/etc/default/grub", "/boot/grub2/grubenv",
+                               "/etc/kernel/cmdline")
+                   if g.is_file(f) and _DISK_NAME_RE.search(_uncommented(g.cat(f)))]
+        if by_name:
+            out["message"] = (f"disques désignés par /dev/sdX dans {', '.join(by_name)} : "
+                              "ils s'appelleront /dev/vdX en virtio — passer en UUID avant "
+                              "la bascule ; conversion non faite")
+            return out
+
+        kernel, initrd = _default_kernel(g)
+        if kernel is None:
+            out["message"] = "aucun noyau dans /lib/modules : conversion non faite"
+            return out
+        dracut = next((p for p in ("/usr/bin/dracut", "/sbin/dracut", "/usr/sbin/dracut")
+                       if g.is_file(p)), None)
+        if dracut:
+            # Conservé pour les mises à jour de noyau ultérieures.
+            g.write(_DRACUT_CONF, f'add_drivers+=" {_LINUX_INITRD_DRIVERS} "\n'.encode())
+            target = initrd or f"/boot/initramfs-{kernel}.img"
+            # --no-hostonly : en mode hostonly, dracut choisirait les pilotes
+            # du matériel de l'appliance libguestfs, pas de la VM.
+            g.command([dracut, "-f", "--no-hostonly", target, kernel])
+            how = f"dracut, noyau {kernel}"
+        elif g.is_file("/usr/sbin/update-initramfs"):
+            modules = "/etc/initramfs-tools/modules"
+            existing = g.cat(modules) if g.is_file(modules) else ""
+            missing = [m for m in _LINUX_INITRD_DRIVERS.split() if m not in existing.split()]
+            if missing:
+                g.write(modules, (existing.rstrip("\n") + "\n" + "\n".join(missing)
+                                  + "\n").encode())
+            g.command(["/usr/sbin/update-initramfs", "-u", "-k", kernel])
+            how = f"update-initramfs, noyau {kernel}"
+        else:
+            out["message"] = "ni dracut ni update-initramfs dans la VM : conversion non faite"
+            return out
+
+        g.sync()
+        _inspect_mounted(g, root, out["guest_drivers"])
+        out["converted"] = out["guest_drivers"]["storage"] == "ok"
+        out["message"] = (f"pilotes virtio ajoutés à l'initramfs ({how})" if out["converted"]
+                          else f"initramfs reconstruit ({how}) mais virtio toujours absent")
+    except RuntimeError as exc:
+        out["message"] = f"conversion échouée : {exc}"
+    finally:
+        _close(g)
+    return out
+
+
+def _uncommented(text: str) -> str:
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
+def _cpio_names(data: bytes, pos: int = 0) -> tuple[list[bytes], int]:
+    """Noms des fichiers des archives cpio « newc » consécutives à partir de
+    `pos`, et la position qui suit (bourrage entre archives sauté)."""
+    names: list[bytes] = []
     while data[pos:pos + 6] in (b"070701", b"070702"):
-        start = pos
         while True:
             namesize = int(data[pos + 94:pos + 102], 16)
             filesize = int(data[pos + 54:pos + 62], 16)
@@ -258,23 +371,34 @@ def _initrd_text(data: bytes) -> bytes:
             pos = (pos + filesize + 3) & ~3
             if name == b"TRAILER!!!":
                 break
-        out += data[start:pos]
-        while pos < len(data) and data[pos] == 0:        # bourrage entre archives
+            names.append(name)
+        while pos < len(data) and data[pos] == 0:
             pos += 1
+    return names, pos
+
+
+def _initrd_modules(data: bytes) -> set[str]:
+    """
+    Modules noyau (« virtio_blk »...) présents dans un initramfs. dracut et
+    initramfs-tools préfixent souvent une archive cpio non compressée
+    (microcode) avant l'archive principale compressée : on lit les archives
+    non compressées, puis on décompresse la suite. Ce sont les noms de
+    fichiers qui comptent — modules.dep cite aussi des modules absents.
+    """
+    names, pos = _cpio_names(data)
     rest = data[pos:]
-    if not rest:
-        return bytes(out)
-    # décompresseurs « flux » : le bourrage final après l'archive est ignoré
-    if rest[:2] == b"\x1f\x8b":
-        out += zlib.decompressobj(wbits=31).decompress(rest)
-    elif rest[:6] == b"\xfd7zXZ\x00":
-        out += lzma.LZMADecompressor().decompress(rest)
-    elif rest[:4] == b"\x28\xb5\x2f\xfd" or rest[:4] == b"\x02\x21\x4c\x18" or rest[:3] == b"BZh":
-        tool = {b"\x28": "zstd", b"\x02": "lz4", b"B": "bzip2"}[rest[:1]]
-        if shutil.which(tool) is None:
-            raise ValueError(f"compression {tool} non prise en charge sur le relais")
-        out += subprocess.run([tool, "-dc"], input=rest, capture_output=True,
-                              check=True).stdout
-    else:
-        out += rest
-    return bytes(out)
+    if rest:
+        # décompresseurs « flux » : le bourrage final après l'archive est ignoré
+        if rest[:2] == b"\x1f\x8b":
+            rest = zlib.decompressobj(wbits=31).decompress(rest)
+        elif rest[:6] == b"\xfd7zXZ\x00":
+            rest = lzma.LZMADecompressor().decompress(rest)
+        elif rest[:4] in (b"\x28\xb5\x2f\xfd", b"\x02\x21\x4c\x18") or rest[:3] == b"BZh":
+            tool = {b"\x28": "zstd", b"\x02": "lz4", b"B": "bzip2"}[rest[:1]]
+            if shutil.which(tool) is None:
+                raise ValueError(f"compression {tool} non prise en charge sur le relais")
+            rest = subprocess.run([tool, "-dc"], input=rest, capture_output=True,
+                                  check=True).stdout
+        names += _cpio_names(rest)[0]
+    return {n.rsplit(b"/", 1)[-1].split(b".ko")[0].decode(errors="replace")
+            for n in names if b".ko" in n}

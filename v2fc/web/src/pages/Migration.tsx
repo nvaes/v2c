@@ -178,7 +178,7 @@ const VIRTIO_LABELS: Record<string, [string, string]> = {
 function GuestDrivers({ job }: { job: JobOut }) {
   const gd = job.spec?.guest_drivers as
     | { os: string | null; product: string | null; storage: string; network: string;
-        details: string[]; inspected_at: string }
+        details: string[]; inspected_at: string; conversion?: string }
     | undefined;
   if (!gd) return null;
   const [storage, storageCls] = VIRTIO_LABELS[gd.storage] ?? [gd.storage, ""];
@@ -188,6 +188,7 @@ function GuestDrivers({ job }: { job: JobOut }) {
       Pilotes virtio{gd.product ? ` (${gd.product})` : ""} : stockage{" "}
       <span className={`badge ${storageCls}`}>{storage}</span> — réseau {network}
       {" "}— vérifié le {new Date(gd.inspected_at).toLocaleString()}
+      {gd.conversion && <><br />Conversion Linux : {gd.conversion}</>}
     </p>
   );
 }
