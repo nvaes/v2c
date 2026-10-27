@@ -6,6 +6,7 @@ import {
   FcDatastore,
   FcNetwork,
   PlanOut,
+  PlanVmMappingUpdate,
   PlanVmOut,
   SourceNic,
 } from "../api";
@@ -35,8 +36,8 @@ export default function PlanTargetPage() {
   const [resourcesLoading, setResourcesLoading] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState("");
   const [settingTarget, setSettingTarget] = useState(false);
-  const [savingVm, setSavingVm] = useState<string | null>(null);
-  const [savedVm, setSavedVm] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [pendingMapping, setPendingMapping] = useState<
     Record<string, { datastoreUrn: string; networkUrn: string }>
   >({});
@@ -140,76 +141,75 @@ export default function PlanTargetPage() {
     setPendingMapping((prev) => ({ ...prev, [vmId]: { ...pendingFor(vmId), ...patch } }));
   }
 
-  async function saveMapping(vmId: string) {
-    if (!id) return;
-    const vm = plan?.vms.find((v) => v.id === vmId);
-    if (!vm) return;
-    const pending = pendingFor(vmId);
-    // Bug corrigé le 17/09/2026 : si l'utilisateur n'a pas retouché les
-    // <select> depuis le chargement de la page (cas courant : la page
-    // s'ouvre déjà avec le mapping précédemment enregistré affiché),
-    // pending.datastoreUrn/networkUrn valent "" — l'ancien code envoyait
-    // alors `null`, ce que la route PUT /mapping ignore (`if ... is not
-    // None`), donc "Enregistrer" ne faisait strictement rien de visible.
-    // On retombe maintenant sur la valeur déjà affichée (vm.tgt_*), comme
-    // le fait déjà le rendu JSX (currentDs/currentNet), pour que le clic
-    // envoie toujours ce qui est réellement sélectionné à l'écran.
+  // Corps du PUT /mapping pour une VM, ou null si rien n'est choisi.
+  // Bug corrigé le 17/09/2026 : un <select> non retouché depuis le
+  // chargement vaut "" dans pending — on retombe sur la valeur affichée
+  // (vm.tgt_*), comme le rendu JSX (currentDs/currentNet).
+  function mappingBody(vm: PlanVmOut): PlanVmMappingUpdate | null {
+    const pending = pendingFor(vm.id);
     const dsUrn = pending.datastoreUrn || vm.tgt_datastore_urn || "";
     const netUrn = pending.networkUrn || vm.tgt_network_urn || "";
+    const nics = sourceNics?.[vm.id];
+    const anyNet = nics && nics.length > 0
+      ? nics.some((nic, i) => nicTarget(vm, nic, i) !== "")
+      : !!netUrn;
+    if (!dsUrn && !anyNet) return null;
     const ds = datastores.find((d) => d.urn === dsUrn);
     const net = networks.find((n) => n.urn === netUrn);
-    const nics = sourceNics?.[vmId];
-    setSavingVm(vmId);
-    setError(null);
-    setSavedVm(null);
-    try {
-      const updated = await api.setPlanVmMapping(id, vmId, {
-        datastore_urn: dsUrn || null,
-        datastore_name: ds?.name ?? (dsUrn ? vm.tgt_datastore_name : null),
-        ...(nics && nics.length > 0
-          ? {
-              nics: nics.map((nic, i) => {
-                const urn = nicTarget(vm, nic, i);
-                return {
-                  device_key: nic.device_key, label: nic.label, adapter: nic.adapter,
-                  mac: nic.mac, src_network: nic.network,
-                  tgt_network_urn: urn || null,
-                  tgt_network_name: urn ? networks.find((n) => n.urn === urn)?.name ?? null : null,
-                  keep_mac: nicKeepMac(vm, nic),
-                };
-              }),
-            }
-          : {
-              network_urn: netUrn || null,
-              network_name: net?.name ?? (netUrn ? vm.tgt_network_name : null),
+    return {
+      datastore_urn: dsUrn || null,
+      datastore_name: ds?.name ?? (dsUrn ? vm.tgt_datastore_name : null),
+      ...(nics && nics.length > 0
+        ? {
+            nics: nics.map((nic, i) => {
+              const urn = nicTarget(vm, nic, i);
+              return {
+                device_key: nic.device_key, label: nic.label, adapter: nic.adapter,
+                mac: nic.mac, src_network: nic.network,
+                tgt_network_urn: urn || null,
+                tgt_network_name: urn ? networks.find((n) => n.urn === urn)?.name ?? null : null,
+                keep_mac: nicKeepMac(vm, nic),
+              };
             }),
-      });
-      setPlan(updated);
-      setPendingNics((prev) => {
-        const next = { ...prev };
-        delete next[vmId];
-        return next;
-      });
-      setPendingKeepMac((prev) => {
-        const next = { ...prev };
-        delete next[vmId];
-        return next;
-      });
-      // On efface l'override "pending" : l'état vient d'être confirmé par
-      // le serveur, l'affichage doit repartir de vm.tgt_* (source de
-      // vérité) et donc pouvoir réafficher le libellé "actuel : ...".
-      setPendingMapping((prev) => {
-        const next = { ...prev };
-        delete next[vmId];
-        return next;
-      });
-      setSavedVm(vmId);
-      window.setTimeout(() => setSavedVm((cur) => (cur === vmId ? null : cur)), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSavingVm(null);
+          }
+        : {
+            network_urn: netUrn || null,
+            network_name: net?.name ?? (netUrn ? vm.tgt_network_name : null),
+          }),
+    };
+  }
+
+  // Un seul bouton pour tout le plan (27/10/2026) : enregistre chaque VM
+  // ayant au moins un datastore ou un réseau choisi, l'une après l'autre.
+  // Les choix en cours ne sont effacés qu'après succès complet, pour ne
+  // rien perdre si une VM est refusée par le serveur.
+  async function saveAll() {
+    if (!id || !plan) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    const failures: string[] = [];
+    let updated: PlanOut | null = null;
+    for (const vm of plan.vms) {
+      const body = mappingBody(vm);
+      if (!body) continue;
+      try {
+        updated = await api.setPlanVmMapping(id, vm.id, body);
+      } catch (err) {
+        failures.push(`${vm.src_vm_name} : ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
+    if (updated) setPlan(updated);
+    if (failures.length > 0) {
+      setError(`Enregistrement refusé — ${failures.join(" ; ")}`);
+    } else {
+      setPendingMapping({});
+      setPendingNics({});
+      setPendingKeepMac({});
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+    }
+    setSaving(false);
   }
 
   return (
@@ -284,7 +284,6 @@ export default function PlanTargetPage() {
                   <th>VM</th>
                   <th>Datastore cible</th>
                   <th>Réseaux (une ligne par carte source)</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -293,9 +292,6 @@ export default function PlanTargetPage() {
                   const currentDs = pending.datastoreUrn || vm.tgt_datastore_urn || "";
                   const currentNet = pending.networkUrn || vm.tgt_network_urn || "";
                   const nics = sourceNics?.[vm.id];
-                  const anyNet = nics && nics.length > 0
-                    ? nics.some((nic, i) => nicTarget(vm, nic, i) !== "")
-                    : !!currentNet;
                   return (
                     <tr key={vm.id}>
                       <td>{vm.src_vm_name}</td>
@@ -375,28 +371,30 @@ export default function PlanTargetPage() {
                         </>
                         )}
                       </td>
-                      <td>
-                        <button
-                          className="secondary"
-                          disabled={savingVm === vm.id || (!currentDs && !anyNet)}
-                          onClick={() => saveMapping(vm.id)}
-                        >
-                          {savingVm === vm.id ? "…" : "Enregistrer"}
-                        </button>
-                        {savedVm === vm.id && <span className="muted"> enregistré ✓</span>}
-                      </td>
                     </tr>
                   );
                 })}
                 {plan.vms.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="muted">
+                    <td colSpan={3} className="muted">
                       Ce plan ne contient aucune VM.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
+          )}
+
+          {!resourcesLoading && plan.vms.length > 0 && (
+            <p>
+              <button
+                disabled={saving || !plan.vms.some((vm) => mappingBody(vm) !== null)}
+                onClick={saveAll}
+              >
+                {saving ? "Enregistrement…" : "Enregistrer le plan"}
+              </button>
+              {saved && <span className="muted"> enregistré ✓</span>}
+            </p>
           )}
         </>
       )}

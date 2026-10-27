@@ -1842,3 +1842,22 @@ Correctifs :
   interrompu ;
 - reprise d'un seed : un disque dont le changeId a déjà été enregistré n'est
   pas recopié, seuls ses changements depuis la copie le sont.
+
+## 34. Actions globales par plan (27/10/2026)
+
+Demande : ne plus enregistrer le mapping ni lancer seed / planification VM
+par VM, mais une fois par plan. Changement uniquement côté interface, les
+routes restent unitaires (boucle en série côté navigateur) :
+- `PlanTarget.tsx` : bouton **Enregistrer le plan** sous le tableau ;
+  `mappingBody()` construit le PUT `/mapping` de chaque VM (null si rien
+  choisi). Les choix en cours ne sont effacés qu'après succès de toutes les
+  VM, les erreurs sont regroupées par VM.
+- `Migration.tsx` : relais choisi par plan ; **Lancer le premier seed** crée
+  les jobs manquants (mapping complet) et provisionne ceux en
+  CREATED/VALIDATING, en série (le provisioning parle au VRM), sans
+  s'arrêter sur un échec — un nouveau clic reprend les VM restantes. Les
+  boutons par VM « Créer un job » / « Provisionner » disparaissent.
+- Delta quotidien : une heure par plan, appliquée à tous les jobs avec
+  relais du plan (`PUT /delta-schedule` accepte tout état ; le runner ne
+  lance le delta que sur un job SYNCED). « Lancer un delta maintenant »
+  reste par VM.

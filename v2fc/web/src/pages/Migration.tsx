@@ -138,11 +138,13 @@ export default function MigrationPage() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const runner = useRunnerStatus();
   const [autoRestart, setAutoRestart] = useState<Record<string, boolean>>({});
-  // Heure du delta quotidien en cours de saisie, par job.
+  // Heure du delta quotidien en cours de saisie, par plan.
   const [scheduleTime, setScheduleTime] = useState<Record<string, string>>({});
-  // Relais choisi par VM de plan avant création du job ("" = aucun relais,
+  // Relais choisi par plan pour les jobs à créer ("" = aucun relais,
   // écriture locale). Absent = premier relais de la cible du plan.
   const [relayChoice, setRelayChoice] = useState<Record<string, string>>({});
+  // Action globale en cours sur un plan (premier seed, planification).
+  const [planProgress, setPlanProgress] = useState<Record<string, string>>({});
 
   function refresh() {
     setLoading(true);
@@ -174,8 +176,8 @@ export default function MigrationPage() {
     return relays.filter((r) => r.target_id === plan.target_id);
   }
 
-  function chosenRelayId(plan: PlanOut, planVmId: string): string {
-    return relayChoice[planVmId] ?? relaysFor(plan)[0]?.id ?? "";
+  function chosenRelayId(plan: PlanOut): string {
+    return relayChoice[plan.id] ?? relaysFor(plan)[0]?.id ?? "";
   }
 
   function relayLabel(relayId: string | null): string {
@@ -184,31 +186,75 @@ export default function MigrationPage() {
     return r ? r.fc_vm_uri : relayId;
   }
 
-  async function createJob(plan: PlanOut, planVmId: string) {
-    setBusyKey(planVmId);
-    setError(null);
-    try {
-      const relayId = chosenRelayId(plan, planVmId) || null;
-      await api.createJob({ plan_vm_id: planVmId, relay_id: relayId });
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusyKey(null);
-    }
+  function canCreate(vm: PlanVmOut): boolean {
+    return !!vm.tgt_datastore_urn && !!vm.tgt_network_urn;
   }
 
-  async function provision(jobId: string) {
-    setBusyKey(jobId);
+  // VM du plan que « Lancer le premier seed » traite : sans job (et mapping
+  // complet), ou job pas encore provisionné (création ou provisioning
+  // précédent en échec).
+  function seedCandidates(plan: PlanOut): PlanVmOut[] {
+    return plan.vms.filter((vm) => {
+      const job = jobFor(vm);
+      return job ? job.state === "CREATED" || job.state === "VALIDATING" : canCreate(vm);
+    });
+  }
+
+  function planRelayJobs(plan: PlanOut): JobOut[] {
+    return plan.vms.map(jobFor).filter((j): j is JobOut => !!j && !!j.relay_id);
+  }
+
+  // Heure commune aux jobs du plan (ou "" si aucune ou différentes).
+  function planDailyTime(plan: PlanOut): string {
+    const times = new Set(planRelayJobs(plan).map((j) => j.delta_daily_time ?? ""));
+    return times.size === 1 ? [...times][0] : "";
+  }
+
+  // Exécute `step` VM par VM (le provisioning parle au VRM : en série), en
+  // continuant après un échec ; les erreurs sont regroupées par VM.
+  async function runForPlan<T>(
+    plan: PlanOut, items: T[], label: (t: T) => string, step: (t: T) => Promise<unknown>,
+  ) {
+    setBusyKey(plan.id);
     setError(null);
-    try {
-      await api.provisionJob(jobId);
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusyKey(null);
+    const failures: string[] = [];
+    for (const [i, item] of items.entries()) {
+      setPlanProgress((p) => ({ ...p, [plan.id]: `${label(item)} (${i + 1}/${items.length})…` }));
+      try {
+        await step(item);
+      } catch (err) {
+        failures.push(`${label(item)} : ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
+    setPlanProgress((p) => {
+      const next = { ...p };
+      delete next[plan.id];
+      return next;
+    });
+    if (failures.length > 0) setError(failures.join(" ; "));
+    setBusyKey(null);
+    refresh();
+  }
+
+  // Premier seed du plan : crée les jobs manquants puis provisionne ; le
+  // runner démarre ensuite la copie initiale de chaque job avec relais.
+  function startPlanSeed(plan: PlanOut) {
+    const relayId = chosenRelayId(plan) || null;
+    runForPlan(plan, seedCandidates(plan), (vm) => vm.src_vm_name, async (vm) => {
+      const job = jobFor(vm) ?? await api.createJob({ plan_vm_id: vm.id, relay_id: relayId });
+      await api.provisionJob(job.id);
+    });
+  }
+
+  // Delta quotidien appliqué à tous les jobs avec relais du plan (le runner
+  // ne le lance que sur les jobs synchronisés).
+  function savePlanSchedule(plan: PlanOut, time: string | null) {
+    runForPlan(plan, planRelayJobs(plan), (j) => j.src_vm_name, (j) => api.setDeltaSchedule(j.id, time))
+      .then(() => setScheduleTime((p) => {
+        const next = { ...p };
+        delete next[plan.id];
+        return next;
+      }));
   }
 
   async function cutover(jobId: string) {
@@ -237,17 +283,6 @@ export default function MigrationPage() {
     } finally {
       setBusyKey(null);
     }
-  }
-
-  function saveSchedule(job: JobOut, time: string | null) {
-    runAction(job.id, async () => {
-      await api.setDeltaSchedule(job.id, time);
-      setScheduleTime((p) => {
-        const next = { ...p };
-        delete next[job.id];
-        return next;
-      });
-    });
   }
 
   async function retryFinalize(jobId: string) {
@@ -314,9 +349,60 @@ export default function MigrationPage() {
       {plans.filter((p) => p.target_id).map((plan) => (
         <div className="card" key={plan.id} style={{ marginBottom: 16 }}>
           <h2 style={{ marginTop: 0 }}>{plan.name}</h2>
+          {seedCandidates(plan).length > 0 && (
+            <p>
+              <label style={{ marginRight: 8 }}>
+                Relais :{" "}
+                <select
+                  value={chosenRelayId(plan)}
+                  onChange={(e) => setRelayChoice((prev) => ({ ...prev, [plan.id]: e.target.value }))}
+                >
+                  {relaysFor(plan).map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.fc_vm_uri} ({r.status})
+                    </option>
+                  ))}
+                  <option value="">aucun (écriture locale)</option>
+                </select>
+              </label>
+              <button disabled={busyKey === plan.id} onClick={() => startPlanSeed(plan)}>
+                Lancer le premier seed ({seedCandidates(plan).length} VM)
+              </button>
+            </p>
+          )}
+          {planRelayJobs(plan).length > 0 && (
+            <div style={{ margin: "8px 0" }}>
+              Delta chaque jour à{" "}
+              <input
+                type="time"
+                value={scheduleTime[plan.id] ?? planDailyTime(plan)}
+                onChange={(e) => setScheduleTime((p) => ({ ...p, [plan.id]: e.target.value }))}
+              />{" "}
+              <button
+                className="secondary"
+                disabled={busyKey === plan.id || !(scheduleTime[plan.id] ?? planDailyTime(plan))}
+                onClick={() => savePlanSchedule(plan, scheduleTime[plan.id] ?? planDailyTime(plan))}
+              >
+                Planifier pour le plan
+              </button>
+              {planRelayJobs(plan).some((j) => j.delta_daily_time) && (
+                <button
+                  className="secondary"
+                  style={{ marginLeft: 4 }}
+                  disabled={busyKey === plan.id}
+                  onClick={() => savePlanSchedule(plan, null)}
+                >
+                  Annuler
+                </button>
+              )}
+              {!planDailyTime(plan) && planRelayJobs(plan).some((j) => j.delta_daily_time) && (
+                <span className="muted"> heures différentes selon les VM</span>
+              )}
+            </div>
+          )}
+          {planProgress[plan.id] && <p className="muted">{planProgress[plan.id]}</p>}
           {plan.vms.map((vm) => {
             const job = jobFor(vm);
-            const canCreate = !!vm.tgt_datastore_urn && !!vm.tgt_network_urn;
             return (
               <div key={vm.id} style={{ borderTop: "1px solid #333", paddingTop: 12, marginTop: 12 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
@@ -339,41 +425,9 @@ export default function MigrationPage() {
                   </p>
                 )}
 
-                {!job && (
-                  <p>
-                    {!canCreate && (
-                      <span className="muted">
-                        datastore/réseau cible pas encore choisis (page « Cible FusionCompute » du
-                        plan) —{" "}
-                      </span>
-                    )}
-                    <label style={{ marginRight: 8 }}>
-                      Relais :{" "}
-                      <select
-                        value={chosenRelayId(plan, vm.id)}
-                        onChange={(e) =>
-                          setRelayChoice((prev) => ({ ...prev, [vm.id]: e.target.value }))
-                        }
-                      >
-                        {relaysFor(plan).map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.fc_vm_uri} ({r.status})
-                          </option>
-                        ))}
-                        <option value="">aucun (écriture locale)</option>
-                      </select>
-                    </label>
-                    <button disabled={!canCreate || busyKey === vm.id} onClick={() => createJob(plan, vm.id)}>
-                      {busyKey === vm.id ? "…" : "Créer un job"}
-                    </button>
-                  </p>
-                )}
-
-                {job && (job.state === "CREATED" || job.state === "VALIDATING") && (
-                  <p>
-                    <button disabled={busyKey === job.id} onClick={() => provision(job.id)}>
-                      {busyKey === job.id ? "…" : "Provisionner"}
-                    </button>
+                {!job && !canCreate(vm) && (
+                  <p className="muted">
+                    datastore/réseau cible pas encore choisis (page « Cible FusionCompute » du plan)
                   </p>
                 )}
 
@@ -404,31 +458,6 @@ export default function MigrationPage() {
                     >
                       Lancer un delta maintenant
                     </button>
-                    <span style={{ marginLeft: 16 }}>
-                      Delta chaque jour à{" "}
-                      <input
-                        type="time"
-                        value={scheduleTime[job.id] ?? job.delta_daily_time ?? ""}
-                        onChange={(e) => setScheduleTime((p) => ({ ...p, [job.id]: e.target.value }))}
-                      />{" "}
-                      <button
-                        className="secondary"
-                        disabled={busyKey === job.id || !scheduleTime[job.id]}
-                        onClick={() => saveSchedule(job, scheduleTime[job.id])}
-                      >
-                        Planifier
-                      </button>
-                      {job.delta_daily_time && (
-                        <button
-                          className="secondary"
-                          style={{ marginLeft: 4 }}
-                          disabled={busyKey === job.id}
-                          onClick={() => saveSchedule(job, null)}
-                        >
-                          Annuler
-                        </button>
-                      )}
-                    </span>
                     {job.delta_scheduled_at && (
                       <p className="muted" style={{ margin: "4px 0 0" }}>
                         Prochain delta : {utc(job.delta_scheduled_at).toLocaleString()}

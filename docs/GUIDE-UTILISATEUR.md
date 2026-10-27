@@ -88,18 +88,24 @@ enregistrée automatiquement dès que l'environnement FusionCompute existe
    - **conserver la MAC** : recrée la carte avec l'adresse MAC source
      (réservation DHCP, licence liée à la MAC…). Dans ce cas, ne jamais
      rallumer la VM source en même temps que la VM migrée sur le même réseau.
-   - **Enregistrer**.
+
+   Puis **Enregistrer le plan** (un seul bouton, sous le tableau) : enregistre
+   toutes les VM ayant un datastore ou un réseau choisi.
 
 **Rafraîchir la pré-vérification** revérifie les VM du plan juste avant de
 lancer, car une VM peut avoir changé depuis la création du plan.
 
 ## 5. Migration
 
-Onglet **Migration**, VM par VM :
+Onglet **Migration**, plan par plan :
 
-1. **Créer un job** : choisir la VM relais (proposée par défaut).
-2. **Provisionner** : crée sur FusionCompute un volume par disque et
-   l'attache à la VM relais. Le provisioning est refusé avec un message
+1. Choisir la **VM relais** (proposée par défaut), puis **Lancer le premier
+   seed** : pour chaque VM du plan dont le datastore et le réseau sont
+   choisis, crée le job puis le provisionne — un volume par disque sur
+   FusionCompute, attaché à la VM relais. Les VM sont traitées l'une après
+   l'autre ; une VM en échec n'arrête pas les autres, et un nouveau clic ne
+   reprend que les VM pas encore provisionnées.
+2. Le provisioning est refusé avec un message
    clair si le datastore n'a pas la place pour la taille provisionnée des
    disques, ou si la VM relais n'a plus d'emplacement de disque libre
    (25 par VM).
@@ -109,9 +115,11 @@ Onglet **Migration**, VM par VM :
 4. Une fois la copie terminée, la VM est **synchronisée**. Les deltas se
    lancent :
    - à la main : **Lancer un delta maintenant** ;
-   - ou chaque jour à heure fixe : **Delta chaque jour à** *[heure]* →
-     **Planifier** (heure locale, changements d'heure compris ; **Annuler**
-     pour arrêter).
+   - ou chaque jour à heure fixe, pour tout le plan : **Delta chaque jour à**
+     *[heure]* → **Planifier pour le plan** (heure locale, changements
+     d'heure compris ; **Annuler** pour arrêter). La planification peut être
+     posée dès le premier seed : le delta ne part que sur les VM
+     synchronisées.
 
    Plus le dernier delta est récent, plus la bascule est courte.
 5. Sous chaque VM : la **dernière synchronisation** (fin, durée, volume
