@@ -37,6 +37,7 @@ def test_debits_entre_deux_pouls(tmp_path, monkeypatch):
     first = m.sample()
     assert first["cpu_percent"] is None and first["net_rx_bps"] is None
     assert first["mem_total_mb"] == 8192 and first["mem_used_mb"] == 6144
+    assert 0 < first["fs_used_mb"] <= first["fs_total_mb"]
 
     write_proc(proc, cpu="400 0 400 1200 0 0 0 0 0 0", rx=10 * 2 ** 20, tx=1000,
                vdb=(100, 2048, 500, 20480))

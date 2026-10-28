@@ -203,6 +203,8 @@ export interface RelayMetrics {
   net_rx_bps: number | null; net_tx_bps: number | null;
   disk_read_iops: number | null; disk_write_iops: number | null;
   disk_read_bps: number | null; disk_write_bps: number | null;
+  // absents d'un runner antérieur au 28/10/2026
+  fs_total_mb?: number | null; fs_used_mb?: number | null;
 }
 
 export interface PlanReport {

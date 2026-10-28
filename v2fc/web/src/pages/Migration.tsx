@@ -129,6 +129,8 @@ function iops(v: number | null): string {
 function RelayResources({ metrics }: { metrics: RelayMetrics }) {
   const memPct = metrics.mem_total_mb > 0 ? (100 * metrics.mem_used_mb) / metrics.mem_total_mb : 0;
   const gib = (mb: number) => (mb / 1024).toFixed(1);
+  const fsTotal = metrics.fs_total_mb ?? 0;
+  const fsPct = fsTotal > 0 ? (100 * (metrics.fs_used_mb ?? 0)) / fsTotal : 0;
   return (
     <div className="card">
       <h2 style={{ marginTop: 0 }}>Ressources de la VM relais</h2>
@@ -157,6 +159,18 @@ function RelayResources({ metrics }: { metrics: RelayMetrics }) {
             {mibps(metrics.disk_read_bps)} lus — {mibps(metrics.disk_write_bps)} écrits
           </div>
         </div>
+        {fsTotal > 0 && (
+          <div className="resource-tile">
+            {/* partition de /var/lib/docker : images, état du runner, logs */}
+            <div className="muted">Espace disque (Docker)</div>
+            <strong>
+              {gib(metrics.fs_used_mb ?? 0)} / {gib(fsTotal)} Gio ({fsPct.toFixed(0)} %)
+            </strong>
+            <div className={`progress${fsPct >= 90 ? " progress-full" : ""}`}>
+              <div style={{ width: `${fsPct}%` }} />
+            </div>
+          </div>
+        )}
       </div>
       <p className="muted" style={{ margin: "8px 0 0" }}>
         Moyennes sur les 15 dernières secondes, mesurées par le runner.

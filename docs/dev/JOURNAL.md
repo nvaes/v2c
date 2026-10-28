@@ -2083,3 +2083,18 @@ volume, c'est donc le runner qui nettoie.
   ni pour un job en cours, ni pour un autre nom de dossier.
 - Premier passage : 7 dossiers orphelins supprimés, 6 restants (un par job).
 - Test : `tests/test_runner_cleanup.py`.
+
+## 44. Espace disque de la VM relais (28/10/2026)
+
+Demande utilisateur : le cadre « Ressources de la VM relais » (§ du
+27/10) ne montrait pas l'espace disque utilisé.
+
+- `relay_metrics.py` : `fs_total_mb` / `fs_used_mb` par `statvfs("/")` du
+  conteneur runner, calculés comme df (utilisé = blocs - blocs libres).
+  Ce « / » est l'overlay Docker : il reflète la partition de la VM qui
+  porte /var/lib/docker (images, volume d'état du runner, logs, cache
+  libguestfs), celle qui se remplit.
+- Page Migration : tuile « Espace disque (Docker) », utilisé / total en Gio
+  et pourcentage, barre rouge à partir de 90 %. Masquée si le runner est
+  antérieur (champs absents, optionnels dans le schéma).
+- Vérifié sur le relais : 22,4 / 70 Gio, comme df sur l'hôte.

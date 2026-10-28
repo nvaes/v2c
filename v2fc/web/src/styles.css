@@ -26,6 +26,7 @@ input, select { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 4px;
 /* barre de progression d'un round (page Migration, 26/10/2026) */
 .progress { height: 10px; background: #e5e7eb; border-radius: 5px; overflow: hidden; margin: 6px 0 4px; }
 .progress > div { height: 100%; background: #14213d; transition: width 0.5s; }
+.progress-full > div { background: #b91c1c; }   /* espace disque du relais ≥ 90 % */
 /* rapport de migration imprimable (26/10/2026) */
 table.kv th { width: 230px; background: none; vertical-align: top; }
 .report h3 { font-size: 0.95rem; margin: 14px 0 6px; }

@@ -1,12 +1,15 @@
 """
-Mesures de charge de la VM relais (27/10/2026) : CPU, RAM, réseau et IOPS
-disque, lues dans /proc par le runner et jointes à son pouls (toutes les
+Mesures de charge de la VM relais (27/10/2026) : CPU, RAM, réseau, IOPS
+disque et espace disque (28/10/2026), lues dans /proc par le runner et jointes à son pouls (toutes les
 15 s) pour le cadre « VM relais » de la page Migration.
 
 Le conteneur runner est privilégié mais garde son propre espace réseau :
 /proc/stat, /proc/meminfo et /proc/diskstats décrivent toute la VM, alors
 que /proc/net/dev ne voit que le trafic du conteneur — c'est-à-dire celui
 des copies (lecture VDDK depuis la source), l'essentiel du trafic de la VM.
+L'espace disque est celui du système de fichiers de « / » du conteneur :
+l'overlay Docker, donc la partition de la VM qui porte /var/lib/docker
+(images, volume d'état du runner, logs, cache libguestfs).
 
 Les débits sont des moyennes entre deux appels de `RelayMetrics.sample()` :
 le premier appel ne renvoie que la RAM et le nombre de vCPU.
@@ -70,9 +73,18 @@ def _disk_counters(proc: Path, sys_block: Path) -> tuple[int, int, int, int]:
     return reads, writes, rbytes, wbytes
 
 
+def _fs_usage(path: Path) -> tuple[int, int]:
+    """(total, utilisé) en Mio, comme df : utilisé = blocs - blocs libres."""
+    st = os.statvfs(path)
+    total = st.f_blocks * st.f_frsize
+    used = (st.f_blocks - st.f_bfree) * st.f_frsize
+    return total // 2 ** 20, used // 2 ** 20
+
+
 class RelayMetrics:
-    def __init__(self, proc: Path = Path("/proc"), sys_block: Path = Path("/sys/block")) -> None:
-        self.proc, self.sys_block = proc, sys_block
+    def __init__(self, proc: Path = Path("/proc"), sys_block: Path = Path("/sys/block"),
+                 fs_path: Path = Path("/")) -> None:
+        self.proc, self.sys_block, self.fs_path = proc, sys_block, fs_path
         self._prev: tuple | None = None
 
     def _read(self) -> tuple:
@@ -82,6 +94,7 @@ class RelayMetrics:
     def sample(self) -> dict:
         mem = _meminfo(self.proc)
         total_kb = mem.get("MemTotal", 0)
+        fs_total, fs_used = _fs_usage(self.fs_path)
         out: dict = {
             "cpu_count": os.cpu_count() or 0,
             "cpu_percent": None,
@@ -90,6 +103,7 @@ class RelayMetrics:
             "net_rx_bps": None, "net_tx_bps": None,
             "disk_read_iops": None, "disk_write_iops": None,
             "disk_read_bps": None, "disk_write_bps": None,
+            "fs_total_mb": fs_total, "fs_used_mb": fs_used,
         }
         cur = self._read()
         prev, self._prev = self._prev, cur

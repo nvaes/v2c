@@ -410,6 +410,8 @@ class RelayMetrics(BaseModel):
     disk_write_iops: float | None = None
     disk_read_bps: float | None = None
     disk_write_bps: float | None = None
+    fs_total_mb: int | None = None   # espace disque (overlay Docker du runner)
+    fs_used_mb: int | None = None
 
 
 class RunnerHeartbeat(BaseModel):
