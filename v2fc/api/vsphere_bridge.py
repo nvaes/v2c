@@ -147,3 +147,29 @@ def nics_many(host: str, user: str, password: str, port: int, verify_tls: bool,
             except VSphereError:
                 out[iu] = []
     return out
+
+
+def is_windows_guest(guest_id: str, guest_name: str) -> bool:
+    """Invité Windows d'après vSphere : guestId « windows9Server64Guest »,
+    mais aussi « winNetStandardGuest » (2003), « winLonghorn64Guest » (2008)."""
+    return guest_id.lower().startswith("win") or "windows" in guest_name.lower()
+
+
+def guests_many(host: str, user: str, password: str, port: int, verify_tls: bool,
+                instance_uuids: list[str]) -> dict[str, dict]:
+    """OS invité de chaque VM, une seule connexion : nom remonté par VMware
+    Tools s'il existe, sinon celui de la configuration (comme
+    `jobs._source_hardware`). VM introuvable : absente du résultat."""
+    out: dict[str, dict] = {}
+    with VSphereClient(host, user, password, port=port, verify=verify_tls) as client:
+        for iu in instance_uuids:
+            try:
+                raw = client.find_vm(instance_uuid=iu).raw
+            except VSphereError:
+                continue
+            guest_id = raw.config.guestId or ""
+            guest_name = ((raw.guest.guestFullName if raw.guest else None)
+                          or raw.config.guestFullName or "")
+            out[iu] = {"guest_id": guest_id, "guest_name": guest_name,
+                       "windows": is_windows_guest(guest_id, guest_name)}
+    return out

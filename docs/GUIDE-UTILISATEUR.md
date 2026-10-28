@@ -128,6 +128,24 @@ Onglet **Migration**, plan par plan :
 
 Pendant toute cette phase, la VM source reste en service.
 
+**VM Windows : installer les pilotes virtio avant la bascule.** V2FC
+n'installe aucun pilote dans Windows (les VM Linux, elles, sont préparées
+automatiquement au delta final). Au clic sur **Lancer le premier seed**, un
+popup liste les VM Windows du plan et rappelle quoi faire dans chaque VM
+source :
+
+1. installer les outils FusionCompute (UVP VMTools) ou les pilotes
+   virtio-win — stockage (viostor, vioscsi) et réseau (netkvm) ;
+2. laisser passer un delta : les pilotes installés après le seed sont
+   copiés par les deltas suivants ;
+3. vérifier la ligne **Pilotes virtio** de la VM : stockage et réseau
+   « présents ».
+
+Sans ces pilotes, la VM cible démarre sur des disques IDE (3 au plus) et
+**sans réseau**. **Migrer maintenant** affiche le même popup pour une VM
+Windows dont la copie n'a pas encore les deux pilotes ; « Migrer quand
+même » lance la bascule malgré tout.
+
 ## 6. Bascule
 
 **Migrer maintenant** (cocher *redémarrer automatiquement la VM cible* si

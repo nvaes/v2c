@@ -186,14 +186,16 @@ const VIRTIO_LABELS: Record<string, [string, string]> = {
   unknown: ["non déterminés", ""],
 };
 
+type GuestDriversSpec = {
+  os: string | null; product: string | null; storage: string; network: string;
+  details: string[]; inspected_at: string; conversion?: string;
+};
+
 // Pilotes virtio de l'OS copié, relus par job-run après chaque round réussi
 // (datamover/guest_drivers.py) : sans pilote de stockage chargé au démarrage,
 // la VM cible doit démarrer sur IDE.
 function GuestDrivers({ job }: { job: JobOut }) {
-  const gd = job.spec?.guest_drivers as
-    | { os: string | null; product: string | null; storage: string; network: string;
-        details: string[]; inspected_at: string; conversion?: string }
-    | undefined;
+  const gd = job.spec?.guest_drivers as GuestDriversSpec | undefined;
   if (!gd) return null;
   const [storage, storageCls] = VIRTIO_LABELS[gd.storage] ?? [gd.storage, ""];
   // réseau aussi bloquant : la carte cible FusionCompute est virtio, sans
@@ -207,6 +209,76 @@ function GuestDrivers({ job }: { job: JobOut }) {
       {" "}— vérifié le {new Date(gd.inspected_at).toLocaleString("fr-FR")}
       {gd.conversion && <><br />Conversion Linux : {gd.conversion}</>}
     </p>
+  );
+}
+
+// Popup avant de migrer une VM Windows (28/10/2026) : V2FC n'injecte aucun
+// pilote dans Windows (seul Linux est converti au delta final), ils doivent
+// être installés dans la VM source. Avant le premier seed, et à la bascule
+// si la dernière inspection de la copie ne les trouve pas.
+type DriversWarning = {
+  kind: "seed" | "cutover"; vms: string[]; gd?: GuestDriversSpec; onConfirm: () => void;
+};
+
+function WindowsDriversWarning({ warning, onCancel }: {
+  warning: DriversWarning; onCancel: () => void;
+}) {
+  const { kind, vms, gd } = warning;
+  const label = (v: string | undefined) => (v ? VIRTIO_LABELS[v]?.[0] ?? v : "non vérifiés");
+  return (
+    <div className="modal-backdrop">
+      <div className="modal" style={{ overflowY: "auto" }}>
+        <h2 style={{ marginTop: 0 }}>VM Windows : pilotes virtio à installer avant la migration</h2>
+        <p style={{ margin: "4px 0" }}>
+          {kind === "seed"
+            ? `${vms.length > 1 ? `Ces ${vms.length} VM sont` : "Cette VM est"} sous Windows :`
+            : "La copie de cette VM Windows n'a pas tous ses pilotes virtio :"}
+        </p>
+        <ul style={{ margin: "4px 0" }}>
+          {vms.map((name) => <li key={name}><strong>{name}</strong></li>)}
+        </ul>
+        {kind === "cutover" && (
+          <p style={{ margin: "4px 0" }}>
+            Dernière inspection : stockage <strong>{label(gd?.storage)}</strong>, réseau{" "}
+            <strong>{label(gd?.network)}</strong>
+            {gd?.inspected_at && ` (${new Date(gd.inspected_at).toLocaleString("fr-FR")})`}.
+          </p>
+        )}
+        <p style={{ margin: "4px 0" }}>
+          V2FC n'installe aucun pilote dans Windows. Sans pilote de stockage virtio chargé au
+          démarrage, la VM cible démarre sur des disques IDE (3 au plus, lents) ; sans pilote
+          réseau virtio, elle démarre <strong>sans réseau</strong> (la carte FusionCompute est
+          virtio).
+        </p>
+        <p style={{ margin: "4px 0" }}>Dans chaque VM source, avant la bascule :</p>
+        <ol style={{ margin: "4px 0" }}>
+          <li>
+            installer les outils FusionCompute (UVP VMTools) ou les pilotes virtio-win :
+            stockage (viostor, vioscsi) et réseau (netkvm) ;
+          </li>
+          <li>
+            laisser passer un delta : les pilotes installés après le seed sont copiés par les
+            deltas suivants ;
+          </li>
+          <li>
+            vérifier sur cette page la ligne « Pilotes virtio » de la VM : stockage et réseau
+            « présents » avant « Migrer maintenant ».
+          </li>
+        </ol>
+        {kind === "cutover" && (
+          <p className="error" style={{ margin: "4px 0" }}>
+            La bascule éteint la VM source pour le dernier delta : un pilote installé ensuite ne
+            sera pas copié.
+          </p>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+          <button className="secondary" onClick={onCancel}>Annuler</button>
+          <button onClick={warning.onConfirm}>
+            {kind === "seed" ? "Lancer le seed quand même" : "Migrer quand même"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -342,6 +414,8 @@ export default function MigrationPage() {
   const [planProgress, setPlanProgress] = useState<Record<string, string>>({});
   // Job dont la bascule est suivie dans le popup.
   const [monitorJobId, setMonitorJobId] = useState<string | null>(null);
+  // Avertissement pilotes Windows en attente de confirmation.
+  const [driversWarning, setDriversWarning] = useState<DriversWarning | null>(null);
 
   // Rafraîchissement silencieux (27/10/2026) : `loading` ne vaut true qu'au
   // premier chargement — afficher « Chargement… » toutes les 5 s décalait
@@ -437,12 +511,34 @@ export default function MigrationPage() {
 
   // Premier seed du plan : crée les jobs manquants puis provisionne ; le
   // runner démarre ensuite la copie initiale de chaque job avec relais.
-  function startPlanSeed(plan: PlanOut) {
+  // Les VM Windows (OS lu sur la source) passent d'abord par le popup des
+  // pilotes.
+  async function startPlanSeed(plan: PlanOut) {
     const relayId = chosenRelayId(plan) || null;
-    runForPlan(plan, seedCandidates(plan), (vm) => vm.src_vm_name, async (vm) => {
-      const job = jobFor(vm) ?? await api.createJob({ plan_vm_id: vm.id, relay_id: relayId });
-      await api.provisionJob(job.id);
-    });
+    const candidates = seedCandidates(plan);
+    const run = () => {
+      setDriversWarning(null);
+      runForPlan(plan, candidates, (vm) => vm.src_vm_name, async (vm) => {
+        const job = jobFor(vm) ?? await api.createJob({ plan_vm_id: vm.id, relay_id: relayId });
+        await api.provisionJob(job.id);
+      });
+    };
+    setBusyKey(plan.id);
+    const windowsVms = await windowsVmNames(plan, candidates);
+    setBusyKey(null);
+    if (windowsVms.length > 0) setDriversWarning({ kind: "seed", vms: windowsVms, onConfirm: run });
+    else run();
+  }
+
+  // VM Windows parmi `vms`. Source injoignable : aucune (pas d'avertissement ;
+  // le provisioning échouera de toute façon avec l'erreur de connexion).
+  async function windowsVmNames(plan: PlanOut, vms: PlanVmOut[]): Promise<string[]> {
+    try {
+      const guests = await api.getPlanSourceGuests(plan.id);
+      return vms.filter((vm) => guests[vm.id]?.windows).map((vm) => vm.src_vm_name);
+    } catch {
+      return [];
+    }
   }
 
   // Delta quotidien appliqué à tous les jobs avec relais du plan (le runner
@@ -456,9 +552,34 @@ export default function MigrationPage() {
       }));
   }
 
-  async function cutover(jobId: string) {
+  // VM Windows dont la copie n'a pas les pilotes virtio de stockage et de
+  // réseau : popup des pilotes à la place de la confirmation simple. OS de
+  // la dernière inspection, ou de la source si elle ne l'a pas déterminé.
+  async function cutover(plan: PlanOut, job: JobOut) {
+    const gd = job.spec?.guest_drivers as GuestDriversSpec | undefined;
+    let windows = gd?.os === "windows";
+    if (!gd?.os) {
+      const vm = plan.vms.find((v) => v.src_instance_uuid === job.src_instance_uuid);
+      setBusyKey(job.id);
+      windows = !!vm && (await windowsVmNames(plan, [vm])).length > 0;
+      setBusyKey(null);
+    }
+    if (windows && !(gd?.storage === "ok" && gd?.network === "ok")) {
+      setDriversWarning({
+        kind: "cutover", vms: [job.src_vm_name], gd,
+        onConfirm: () => {
+          setDriversWarning(null);
+          startCutover(job.id);
+        },
+      });
+      return;
+    }
     if (!window.confirm("Démarrer la bascule ? La VM source va être éteinte proprement " +
       "pour le dernier delta à froid.")) return;
+    startCutover(job.id);
+  }
+
+  async function startCutover(jobId: string) {
     setBusyKey(jobId);
     setError(null);
     try {
@@ -539,6 +660,9 @@ export default function MigrationPage() {
       )}
       {runner?.online && runner.metrics && <RelayResources metrics={runner.metrics} />}
       {error && <p className="error">{error}</p>}
+      {driversWarning && (
+        <WindowsDriversWarning warning={driversWarning} onCancel={() => setDriversWarning(null)} />
+      )}
       {monitorJobId && (
         <CutoverMonitor jobId={monitorJobId} onClose={() => setMonitorJobId(null)} />
       )}
@@ -682,7 +806,7 @@ export default function MigrationPage() {
                       />{" "}
                       redémarrer automatiquement la VM cible après bascule
                     </label>
-                    <button disabled={busyKey === job.id} onClick={() => cutover(job.id)}>
+                    <button disabled={busyKey === job.id} onClick={() => cutover(plan, job)}>
                       {busyKey === job.id ? "…" : "Migrer maintenant"}
                     </button>
                   </p>

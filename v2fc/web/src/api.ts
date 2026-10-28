@@ -131,6 +131,9 @@ export const api = {
     }),
   getPlanSourceNics: (planId: string) =>
     request<Record<string, SourceNic[]>>(`/plans/${planId}/source-nics`),
+  // OS invité par id de VM de plan (VM introuvable sur la source : absente).
+  getPlanSourceGuests: (planId: string) =>
+    request<Record<string, SourceGuest>>(`/plans/${planId}/source-guests`),
   setPlanVmMapping: (planId: string, planVmId: string, body: PlanVmMappingUpdate) =>
     request<PlanOut>(`/plans/${planId}/vms/${planVmId}/mapping`, {
       method: "PUT",
@@ -249,6 +252,7 @@ export interface PlanNicMapping {
 export interface SourceNic {
   device_key: number; label: string; adapter: string; mac: string; network: string;
 }
+export interface SourceGuest { guest_id: string; guest_name: string; windows: boolean; }
 export interface PlanOut {
   id: string; name: string; source_id: string; target_id: string | null;
   created_at: string; vms: PlanVmOut[];

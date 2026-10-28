@@ -17,7 +17,7 @@ from .. import vsphere_bridge
 from ..db import get_db, get_session_factory
 from ..models import Credential, Endpoint, Job, JobDisk, Plan, PlanVm, Relay, SyncRound, User
 from ..schemas import (PlanCreate, PlanOut, PlanPreflightResponse, PlanTargetUpdate,
-                       PlanVmMappingUpdate, SourceNic)
+                       PlanVmMappingUpdate, SourceGuest, SourceNic)
 from ..security import decrypt_credential_password, require_role
 from .jobs import _connection_args
 from datamover import fusioncompute as fc
@@ -117,6 +117,33 @@ async def plan_source_nics(plan_id: uuid.UUID, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                             detail=f"connexion à {endpoint.name} impossible : {exc}") from exc
     return {str(v.id): by_uuid.get(v.src_instance_uuid, []) for v in plan.vms}
+
+
+@router.get("/{plan_id}/source-guests", response_model=dict[str, SourceGuest])
+async def plan_source_guests(plan_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                             _user: User = Depends(require_role("viewer"))) -> dict:
+    """OS invité de chaque VM du plan, lu sur le vCenter/ESXi source, par id
+    de VM de plan — l'interface prévient avant de migrer une VM Windows
+    (pilotes virtio à installer dans la VM source, rien n'est injecté)."""
+    result = await db.execute(
+        select(Plan).where(Plan.id == plan_id).options(selectinload(Plan.vms)))
+    plan = result.scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="plan introuvable")
+
+    endpoint = await db.get(Endpoint, plan.source_id)
+    cred = await db.get(Credential, endpoint.credential_id)
+    try:
+        by_uuid = await run_in_threadpool(
+            vsphere_bridge.guests_many, host=endpoint.url, user=cred.username,
+            password=decrypt_credential_password(cred), port=endpoint.port or 443,
+            verify_tls=endpoint.verify_tls,
+            instance_uuids=[v.src_instance_uuid for v in plan.vms])
+    except Exception as exc:                            # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"connexion à {endpoint.name} impossible : {exc}") from exc
+    return {str(v.id): by_uuid[v.src_instance_uuid] for v in plan.vms
+            if v.src_instance_uuid in by_uuid}
 
 
 @router.put("/{plan_id}/target", response_model=PlanOut)

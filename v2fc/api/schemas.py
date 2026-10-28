@@ -209,6 +209,12 @@ class SourceNic(BaseModel):
     network: str
 
 
+class SourceGuest(BaseModel):
+    guest_id: str
+    guest_name: str
+    windows: bool
+
+
 class PlanVmOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

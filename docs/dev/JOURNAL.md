@@ -2098,3 +2098,28 @@ Demande utilisateur : le cadre « Ressources de la VM relais » (§ du
   et pourcentage, barre rouge à partir de 90 %. Masquée si le runner est
   antérieur (champs absents, optionnels dans le schéma).
 - Vérifié sur le relais : 22,4 / 70 Gio, comme df sur l'hôte.
+
+## 45. Popup « pilotes virtio » pour les VM Windows (28/10/2026)
+
+Choix : pas d'injection de pilotes dans Windows (virt-v2v + ISO virtio-win
+écarté) ; l'utilisateur installe les pilotes dans la VM source, l'interface
+le prévient. Linux reste converti au delta final (§42).
+
+- `GET /api/v1/plans/{id}/source-guests` (lecteur) : `guest_id`,
+  `guest_name` (VMware Tools, sinon configuration) et `windows` par id de
+  VM de plan, lus sur la source (`vsphere_bridge.guests_many`, une
+  connexion). `is_windows_guest` : guestId commençant par `win` (couvre
+  `winNet*` 2003, `winLonghorn*` 2008) ou « windows » dans le nom.
+- Page Migration, **Lancer le premier seed** : popup listant les VM Windows
+  parmi celles traitées (que faire : outils FusionCompute ou virtio-win,
+  attendre un delta, vérifier « Pilotes virtio »), « Annuler » ou « Lancer
+  le seed quand même ». Source injoignable : pas de popup (le provisioning
+  échoue de toute façon avec l'erreur).
+- **Migrer maintenant** : même popup, à la place de la confirmation simple,
+  si la VM est Windows (OS de la dernière inspection, ou de la source si
+  l'inspection ne l'a pas déterminé) et que stockage ou réseau n'est pas
+  `ok` ; affiche la dernière inspection.
+- Vérifié sur le vCenter de production : 87 VM lues, 65 reconnues Windows
+  (2003 à 2016+, Windows 10), Linux/FreeBSD/Photon non.
+- Test : `tests/test_windows_guest.py`.
+
