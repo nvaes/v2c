@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import lzma
+import struct
 import sys
 from pathlib import Path
 
@@ -103,3 +104,72 @@ def test_nombre_de_cartes_different():
 def test_eth0_non_fixe():
     g = FakeGuest({IFCFG + "eth0": "DEVICE=eth0\n"})
     assert gdm._pin_interface_names(g, [{"device_key": 4000, "mac": "x", "keep_mac": True}]) == ""
+
+
+class FakeWindows:
+    """Windows hors ligne : fichiers, DriverStore et ruche SYSTEM
+    (Services\\<nom>\\Start) réduits au strict nécessaire pour `_windows`."""
+
+    def __init__(self, sys_files=(), staged=(), services=None):
+        self.sys_files = {f"/Windows/System32/drivers/{n}.sys" for n in sys_files}
+        self.staged = [f"{n}.inf_amd64_0123" for n in staged]
+        # noeuds : 1 racine, 2 Select, 3 ControlSet001, 4 Services, 10+ services
+        self.children = {(1, "Select"): 2, (1, "ControlSet001"): 3, (3, "Services"): 4}
+        self.values = {(2, "Current"): 1}
+        for i, (name, start) in enumerate((services or {}).items()):
+            self.children[(4, name)] = 10 + i
+            self.values[(10 + i, "Start")] = start
+
+    def inspect_get_windows_systemroot(self, root):
+        return "/Windows"
+
+    def case_sensitive_path(self, path):
+        return path
+
+    def ls(self, path):
+        return self.staged
+
+    def is_file(self, path):
+        return path in self.sys_files
+
+    def hivex_open(self, path, write):
+        pass
+
+    def hivex_close(self):
+        pass
+
+    def hivex_root(self):
+        return 1
+
+    def hivex_node_get_child(self, node, name):
+        return self.children.get((node, name), 0)
+
+    def hivex_node_get_value(self, node, name):
+        return (node, name) if (node, name) in self.values else 0
+
+    def hivex_value_value(self, value):
+        return struct.pack("<I", self.values[value])
+
+
+def _windows_result(g):
+    result = gdm._new_result()
+    gdm._windows(g, "/dev/sda2", result)
+    return result
+
+
+def test_windows_netkvm_dans_le_driverstore_suffit():
+    # virtio-win installé sur VMware : stockage actif, netkvm sans carte virtio
+    r = _windows_result(FakeWindows(sys_files=["viostor"], staged=["viostor", "netkvm"],
+                                    services={"viostor": 0}))
+    assert (r["storage"], r["network"]) == ("ok", "ok")
+    assert any("Plug and Play" in d for d in r["details"])
+
+
+def test_windows_sans_netkvm():
+    r = _windows_result(FakeWindows(sys_files=["viostor"], services={"viostor": 0}))
+    assert r["network"] == "absent"
+
+
+def test_windows_viostor_seulement_dans_le_driverstore():
+    r = _windows_result(FakeWindows(staged=["viostor"]))
+    assert r["storage"] == "inactive"

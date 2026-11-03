@@ -139,7 +139,11 @@ source :
 2. laisser passer un delta : les pilotes installés après le seed sont
    copiés par les deltas suivants ;
 3. vérifier la ligne **Pilotes virtio** de la VM : stockage et réseau
-   « présents ».
+   « présents ». La copie est réinspectée à la fin de chaque delta réussi.
+   Le pilote réseau reste en attente dans le magasin de pilotes de Windows
+   tant que la VM tourne sur VMware (pas de carte virtio) : c'est normal, il
+   compte comme présent et Windows l'installe au premier démarrage sur
+   FusionCompute.
 
 Sans ces pilotes, la VM cible démarre sur des disques IDE (3 au plus) et
 **sans réseau**. **Migrer maintenant** affiche le même popup pour une VM

@@ -22,7 +22,8 @@ Résultat :
               absent    aucun pilote
               unknown   inspection impossible (détail dans `details`)
     network : ok | absent | unknown   (chargé après le démarrage : pas de
-                                       contrainte d'initramfs)
+                                       contrainte d'initramfs ; Windows : ok
+                                       dès que netkvm est dans le DriverStore)
 """
 from __future__ import annotations
 
@@ -196,10 +197,19 @@ def _windows(g, root: str, result: dict) -> None:
                 storage = "inactive"
             result["details"].append(f"{name} seulement dans le DriverStore (non installé)")
     result["storage"] = storage
+    # Réseau : sur VMware, aucune carte virtio n'existe pour lier netkvm, qui
+    # reste dans le DriverStore après l'installation de virtio-win ; Plug and
+    # Play l'installe au premier démarrage sur FusionCompute (pilote non
+    # requis au démarrage, contrairement au stockage).
     network = [n for n in _WIN_NETWORK if has_file(n) or services[n] is not None]
-    result["network"] = "ok" if network else "absent"
-    if not network and any(n in staged for n in _WIN_NETWORK):
-        result["details"].append("netkvm seulement dans le DriverStore")
+    if network:
+        result["network"] = "ok"
+    elif any(n in staged for n in _WIN_NETWORK):
+        result["network"] = "ok"
+        result["details"].append("netkvm dans le DriverStore (installé par Plug and Play "
+                                 "au premier démarrage sur FusionCompute)")
+    else:
+        result["network"] = "absent"
 
 
 # -- Linux -----------------------------------------------------------------

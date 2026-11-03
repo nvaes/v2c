@@ -2123,3 +2123,25 @@ le prévient. Linux reste converti au delta final (§42).
   (2003 à 2016+, Windows 10), Linux/FreeBSD/Photon non.
 - Test : `tests/test_windows_guest.py`.
 
+
+## 46. Pilote réseau Windows : netkvm dans le DriverStore = présent (03/11/2026)
+
+Constat : après installation de virtio-win dans une VM source Windows
+Server 2012 R2 puis un delta, l'inspection de fin de delta passait bien
+(stockage absent → présent) mais le réseau restait « absent » (« netkvm
+seulement dans le DriverStore »), et « Migrer maintenant » rouvrait le popup.
+
+- Sur VMware, aucune carte virtio n'existe : netkvm est mis dans le
+  DriverStore par l'installeur, sans service ni `netkvm.sys` dans
+  `System32/drivers`. Plug and Play l'installe au premier démarrage sur
+  FusionCompute (pilote réseau non requis au démarrage, contrairement au
+  stockage où viostor/vioscsi doivent avoir Start=0).
+- `guest_drivers._windows` : netkvm dans le DriverStore → `network: ok`,
+  détail « installé par Plug and Play au premier démarrage ». Stockage
+  inchangé (DriverStore seul = `inactive`).
+- Rien à changer côté delta : l'inspection tourne déjà après chaque round
+  réussi (`v2fc_source.cmd_job_run`), seed, delta et delta final.
+- Runner reconstruit (code dans l'image). Prochain delta : la ligne
+  « Pilotes virtio » passe à réseau présent.
+- Tests : `tests/test_guest_drivers.py` (faux Windows : fichiers, DriverStore,
+  ruche SYSTEM).
