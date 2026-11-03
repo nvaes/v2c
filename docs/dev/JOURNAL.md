@@ -2212,3 +2212,18 @@ signalée) et le plan restait.
   données réelles et un flux d'erreur : l'erreur s'affiche). Ajout d'un
   `ErrorBoundary` autour de l'application (`web/src/ErrorBoundary.tsx`) :
   une exception de rendu affiche message et pile au lieu d'une page blanche.
+
+## 50. Page blanche : « destroy is not a function » (03/11/2026)
+
+Erreur affichée par l'ErrorBoundary (§49) à la suppression d'un plan.
+
+- `useEffect(() => ref.current?.scrollIntoView(...), [...])` : dans les
+  navigateurs récents `scrollIntoView` renvoie une Promise ; l'effet la
+  renvoie, React la prend pour la fonction de nettoyage et plante au
+  changement suivant de la dépendance ou au démontage → toute l'application
+  démontée. Deux occurrences : popup de suppression (`Plans.tsx`) et popup
+  de bascule (`Migration.tsx`) — cause du popup de bascule figé du §47,
+  où ce plantage arrêtait aussi toutes les relectures de la page.
+- Corps d'effet entre accolades. Reproduit en jsdom (scrollIntoView
+  renvoyant une Promise) : plantage avant, page intacte après.
+- Règle : jamais d'effet à corps-expression qui appelle une API DOM.

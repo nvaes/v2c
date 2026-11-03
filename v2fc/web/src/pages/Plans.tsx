@@ -18,7 +18,12 @@ export default function PlansPage() {
   } | null>(null);
   const logEnd = useRef<HTMLDivElement>(null);
 
-  useEffect(() => logEnd.current?.scrollIntoView({ block: "end" }), [deleteLog?.lines.length]);
+  // Corps entre accolades : scrollIntoView renvoie une Promise dans les
+  // navigateurs récents, que React prendrait pour la fonction de nettoyage
+  // de l'effet (« destroy is not a function », page blanche — 03/11/2026).
+  useEffect(() => {
+    logEnd.current?.scrollIntoView({ block: "end" });
+  }, [deleteLog?.lines.length]);
 
   function refresh() {
     setLoading(true);

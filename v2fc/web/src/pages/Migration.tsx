@@ -397,7 +397,12 @@ function CutoverMonitor({ jobId, onClose }: { jobId: string; onClose: () => void
     };
   }, [jobId]);
 
-  useEffect(() => bottomRef.current?.scrollIntoView({ block: "end" }), [entries.length]);
+  // Corps entre accolades : scrollIntoView renvoie une Promise dans les
+  // navigateurs récents, que React prendrait pour la fonction de nettoyage
+  // de l'effet (« destroy is not a function », page blanche — 03/11/2026).
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [entries.length]);
 
   const stepIndex = job ? CUTOVER_STEPS.findIndex(([s]) => s === job.state) : -1;
   const finished = job?.state === "CUTOVER_DONE";
