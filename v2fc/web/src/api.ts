@@ -161,6 +161,7 @@ export const api = {
   rollbackJob: (id: string) => request<JobOut>(`/jobs/${id}/rollback`, { method: "POST" }),
   finalizeJob: (id: string) => request<JobOut>(`/jobs/${id}/finalize`, { method: "POST" }),
   requestDelta: (id: string) => request<JobOut>(`/jobs/${id}/delta`, { method: "POST" }),
+  refreshJobNetwork: (id: string) => request<JobOut>(`/jobs/${id}/network`, { method: "POST" }),
   // time « HH:MM » chaque jour, heure locale du navigateur (null = annuler)
   setDeltaSchedule: (id: string, time: string | null) =>
     request<JobOut>(`/jobs/${id}/delta-schedule`, {

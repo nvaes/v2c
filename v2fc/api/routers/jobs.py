@@ -519,7 +519,50 @@ async def report_round(job_id: uuid.UUID, round_id: uuid.UUID, body: JobRoundRep
         await _finalize(db, job)
     else:
         _set_state(job, "SYNCED")
+        await _refresh_source_network(db, job)
 
+    await db.commit()
+    return await _load_job_full(db, job.id)
+
+
+async def _refresh_source_network(db: AsyncSession, job: Job) -> None:
+    """Relevé des cartes et IP source (VM allumée : après un seed ou un
+    delta). Une erreur vCenter n'empêche pas le rapport du round."""
+    try:
+        src_args = await _connection_args(db, await db.get(Endpoint, job.source_id))
+        nics = await run_in_threadpool(_read_source_network, src_args, job.src_instance_uuid)
+    except (VSphereError, HTTPException) as exc:
+        await _log(db, job.id, f"relevé réseau de la VM source impossible : {exc}", "warning")
+        return
+    job.spec = {**(job.spec or {}),
+                "network_source": _merge_source_network((job.spec or {}).get("network_source"), nics)}
+
+
+@router.post("/{job_id}/network", response_model=JobOut)
+async def refresh_network(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                          _user: User = Depends(require_role("viewer"))) -> dict:
+    """Relit les cartes et IP de la VM source et, après la bascule, de la VM
+    cible (IP remontées une fois les outils FusionCompute démarrés)."""
+    job = await db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job introuvable")
+    await _refresh_source_network(db, job)
+    if job.tgt_vm_uri:
+        target = await db.get(Endpoint, job.target_id)
+        tgt_args = await _connection_args(db, target)
+
+        def read_target() -> list[dict]:
+            with fc.FusionComputeClient(tgt_args["host"], tgt_args["user"], tgt_args["password"],
+                                        port=target.port or fc.DEFAULT_API_PORT,
+                                        verify=target.verify_tls) as client:
+                vm = client.get_vm(job.tgt_vm_uri.rstrip("/").rsplit("/", 1)[-1])
+                return vm["vmConfig"].get("nics") or []
+        try:
+            job.spec = {**job.spec, "network_target": _target_network(
+                await run_in_threadpool(read_target))}
+        except fc.FusionComputeError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail=f"lecture de la VM cible impossible : {exc}") from exc
     await db.commit()
     return await _load_job_full(db, job.id)
 
@@ -575,63 +618,81 @@ async def _finalize(db: AsyncSession, job: Job) -> None:
                    key=lambda d: d.device_key)
     relay_vm_id = relay.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1]
 
+    # Appels FusionCompute en thread et journal validé à chaque étape
+    # (03/11/2026) : appelés directement, ils bloquaient la boucle de l'API
+    # ~15 s (toute l'interface figée, popup de bascule compris) et les lignes
+    # du journal n'apparaissaient qu'à la fin de la finalisation.
+    async def call(fn, *args, **kwargs):
+        return await run_in_threadpool(fn, *args, **kwargs)
+
+    async def step(message: str, level: str = "info") -> None:
+        await _log(db, job.id, message, level)
+        await db.commit()
+
+    await db.commit()
     try:
-        with fc.FusionComputeClient(tgt_args["host"], tgt_args["user"], tgt_args["password"],
-                                    port=target.port or fc.DEFAULT_API_PORT,
-                                    verify=target.verify_tls) as fc_client:
-            def vol_urn(jd: JobDisk) -> str:
-                return f"urn:sites:{fc_client.site.id}:volumes:{jd.tgt_volume_uri.rstrip('/').rsplit('/', 1)[-1]}"
-
-            on_relay = {d["volumeUrn"] for d in fc_client.get_vm(relay_vm_id)["vmConfig"]["disks"]}
-            for jd in disks:
-                if jd.tgt_volume_uri and vol_urn(jd) in on_relay:
-                    resp = fc_client.detach_volume(relay_vm_id, vol_urn=vol_urn(jd))
-                    fc_client.wait_task(resp["taskUri"])
-                    await _log(db, job.id, f"volume {vol_urn(jd)} détaché du relais")
-
-            if job.tgt_vm_uri is None:
-                os_type, os_version, os_label = fc.pick_os_version(
-                    fc_client.list_os_versions(), hw["guest_name"], hw["guest_id"])
-                # Aucun autre moyen documenté de choisir l'emplacement de la VM
-                # cible : celui de la VM relais (§7.5, champ `location`).
-                relay_vm_info = fc_client.get_vm(relay_vm_id)
-                create_resp = fc_client.create_vm(
-                    name=job.src_vm_name, location_urn=relay_vm_info["location"],
-                    cpu_count=hw["cpu"], memory_mb=hw["memory_mb"],
-                    os_type=os_type, os_version=os_version,
-                    boot_firmware="UEFI" if hw["firmware"] == "efi" else "BIOS",
-                    nics=_target_nics(plan_vm))
-                fc_client.wait_task(create_resp["taskUri"])
-                job.tgt_vm_uri = create_resp["uri"]
-                await _log(db, job.id,
-                           f"VM cible créée : {len(_target_nics(plan_vm))} carte(s) réseau, "
-                           f"{hw['cpu']} vCPU, {hw['memory_mb']} Mo, "
-                           f"{hw['firmware'].upper()}, OS « {os_label} » "
-                           f"(source : {hw['guest_name']})")
-                await db.commit()
-            tgt_vm_id = job.tgt_vm_uri.rstrip("/").rsplit("/", 1)[-1]
-
-            on_target = {d["volumeUrn"] for d in fc_client.get_vm(tgt_vm_id)["vmConfig"]["disks"]}
-            virtio = _virtio_ready(job)
-            for i, jd in enumerate(d for d in disks if d.tgt_volume_uri):
-                if vol_urn(jd) in on_target:
-                    continue
-                pci = "VIRTIO" if virtio or i >= _IDE_SLOTS else _TARGET_PCI_TYPE
-                resp = fc_client.attach_volume(tgt_vm_id, vol_urn=vol_urn(jd), pci_type=pci)
-                fc_client.wait_task(resp["taskUri"])
-                await _log(db, job.id, f"volume {vol_urn(jd)} attaché à la VM cible ({pci})")
-            if not virtio and len(disks) > _IDE_SLOTS:
-                await _log(db, job.id,
-                           f"disques au-delà du {_IDE_SLOTS}e attachés en VIRTIO : visibles une "
-                           f"fois les outils FusionCompute installés dans la VM", "warning")
-
-            if job.spec.get("auto_restart"):
-                resp = fc_client.power_on(tgt_vm_id)
-                fc_client.wait_task(resp["taskUri"])
-                await _log(db, job.id, "VM cible démarrée automatiquement sur FusionCompute")
+        fc_client = await call(fc.FusionComputeClient, tgt_args["host"], tgt_args["user"],
+                               tgt_args["password"], port=target.port or fc.DEFAULT_API_PORT,
+                               verify=target.verify_tls)
     except fc.FusionComputeError as exc:
         await _log(db, job.id, f"bascule finale échouée : {exc}", "error")
         return
+    try:
+        def vol_urn(jd: JobDisk) -> str:
+            return f"urn:sites:{fc_client.site.id}:volumes:{jd.tgt_volume_uri.rstrip('/').rsplit('/', 1)[-1]}"
+
+        on_relay = {d["volumeUrn"] for d in (await call(fc_client.get_vm, relay_vm_id))["vmConfig"]["disks"]}
+        for jd in disks:
+            if jd.tgt_volume_uri and vol_urn(jd) in on_relay:
+                resp = await call(fc_client.detach_volume, relay_vm_id, vol_urn=vol_urn(jd))
+                await call(fc_client.wait_task, resp["taskUri"])
+                await step(f"volume {vol_urn(jd)} détaché du relais")
+
+        if job.tgt_vm_uri is None:
+            os_type, os_version, os_label = fc.pick_os_version(
+                await call(fc_client.list_os_versions), hw["guest_name"], hw["guest_id"])
+            # Aucun autre moyen documenté de choisir l'emplacement de la VM
+            # cible : celui de la VM relais (§7.5, champ `location`).
+            relay_vm_info = await call(fc_client.get_vm, relay_vm_id)
+            create_resp = await call(
+                fc_client.create_vm,
+                name=job.src_vm_name, location_urn=relay_vm_info["location"],
+                cpu_count=hw["cpu"], memory_mb=hw["memory_mb"],
+                os_type=os_type, os_version=os_version,
+                boot_firmware="UEFI" if hw["firmware"] == "efi" else "BIOS",
+                nics=_target_nics(plan_vm))
+            await call(fc_client.wait_task, create_resp["taskUri"])
+            job.tgt_vm_uri = create_resp["uri"]
+            await step(f"VM cible créée : {len(_target_nics(plan_vm))} carte(s) réseau, "
+                       f"{hw['cpu']} vCPU, {hw['memory_mb']} Mo, "
+                       f"{hw['firmware'].upper()}, OS « {os_label} » "
+                       f"(source : {hw['guest_name']})")
+        tgt_vm_id = job.tgt_vm_uri.rstrip("/").rsplit("/", 1)[-1]
+
+        on_target = {d["volumeUrn"] for d in (await call(fc_client.get_vm, tgt_vm_id))["vmConfig"]["disks"]}
+        virtio = _virtio_ready(job)
+        for i, jd in enumerate(d for d in disks if d.tgt_volume_uri):
+            if vol_urn(jd) in on_target:
+                continue
+            pci = "VIRTIO" if virtio or i >= _IDE_SLOTS else _TARGET_PCI_TYPE
+            resp = await call(fc_client.attach_volume, tgt_vm_id, vol_urn=vol_urn(jd), pci_type=pci)
+            await call(fc_client.wait_task, resp["taskUri"])
+            await step(f"volume {vol_urn(jd)} attaché à la VM cible ({pci})")
+        if not virtio and len(disks) > _IDE_SLOTS:
+            await step(f"disques au-delà du {_IDE_SLOTS}e attachés en VIRTIO : visibles une "
+                       f"fois les outils FusionCompute installés dans la VM", "warning")
+
+        if job.spec.get("auto_restart"):
+            resp = await call(fc_client.power_on, tgt_vm_id)
+            await call(fc_client.wait_task, resp["taskUri"])
+            await step("VM cible démarrée automatiquement sur FusionCompute")
+        job.spec = {**job.spec, "network_target": _target_network(
+            (await call(fc_client.get_vm, tgt_vm_id))["vmConfig"].get("nics") or [])}
+    except fc.FusionComputeError as exc:
+        await _log(db, job.id, f"bascule finale échouée : {exc}", "error")
+        return
+    finally:
+        await call(fc_client.close)
 
     _set_state(job, "CUTOVER_DONE")
     if _virtio_ready(job):
@@ -670,6 +731,61 @@ def _virtio_ready(job: Job) -> bool:
     la dernière inspection de job-run (après le delta final, conversion Linux
     comprise) : tous les disques peuvent alors être attachés en VIRTIO."""
     return ((job.spec or {}).get("guest_drivers") or {}).get("storage") == "ok"
+
+
+def _shutdown_source(src_args: dict, instance_uuid: str) -> tuple[str, list[dict]]:
+    """Cartes et IP de la VM source relevées juste avant son extinction
+    (VMware Tools ne les remonte plus une fois éteinte), puis extinction."""
+    with VSphereClient(src_args["host"], src_args["user"], src_args["password"],
+                       port=src_args["port"], verify=src_args["verify_tls"]) as client:
+        vm = client.find_vm(instance_uuid=instance_uuid)
+        network = _source_network(vm)
+        return vm.shutdown_guest(), network
+
+
+# Ligne « Réseau » de la page Migration (03/11/2026) : cartes de la VM
+# source (réseau VMware, IP remontées par VMware Tools) et de la VM cible
+# (port group, MAC, IP remontées par les outils FusionCompute), conservées
+# dans job.spec (`network_source`, `network_target`) : la source éteinte
+# n'a plus d'IP, et la page ne doit pas interroger vCenter/VRM toutes les 5 s.
+def _source_network(vm) -> list[dict]:
+    ips: dict[int, list[str]] = {}
+    for gnic in (vm.raw.guest.net if vm.raw.guest else None) or []:
+        if gnic.deviceConfigId is not None and gnic.deviceConfigId >= 0:
+            ips[gnic.deviceConfigId] = [ip for ip in (gnic.ipAddress or [])
+                                        if not ip.lower().startswith("fe80:")]
+    return [{"device_key": n["device_key"], "label": n["label"], "mac": n["mac"],
+             "network": n["network"], "ips": ips.get(n["device_key"], [])}
+            for n in vm.nics()]
+
+
+def _read_source_network(src_args: dict, instance_uuid: str) -> list[dict]:
+    with VSphereClient(src_args["host"], src_args["user"], src_args["password"],
+                       port=src_args["port"], verify=src_args["verify_tls"]) as client:
+        return _source_network(client.find_vm(instance_uuid=instance_uuid))
+
+
+def _merge_source_network(previous: dict | None, nics: list[dict]) -> dict:
+    """Relevé source : une carte sans IP (VM éteinte, Tools arrêtés) garde
+    les IP du relevé précédent."""
+    old = {n["device_key"]: n for n in (previous or {}).get("nics", [])}
+    merged = [{**n, "ips": n["ips"] or old.get(n["device_key"], {}).get("ips", [])}
+              for n in nics]
+    return {"nics": merged, "read_at": datetime.now(timezone.utc).isoformat()}
+
+
+def _target_network(fc_nics: list[dict]) -> dict:
+    """Cartes de la VM cible FusionCompute, dans l'ordre de création (celui
+    de `_target_nics`). `ip` vaut 0.0.0.0 tant que les outils FusionCompute
+    ne remontent rien."""
+    out = []
+    for n in sorted(fc_nics, key=lambda n: n.get("sequenceNum", 0)):
+        ips = [ip.strip() for ip in str(n.get("ipList") or n.get("ip") or "").replace(";", ",").split(",")]
+        ips += [ip for ip in n.get("ips6") or [] if not str(ip).lower().startswith("fe80:")]
+        out.append({"name": n.get("name", ""), "mac": n.get("mac", ""),
+                    "network": n.get("portGroupName", ""),
+                    "ips": [ip for ip in ips if ip and ip != "0.0.0.0"]})
+    return {"nics": out, "read_at": datetime.now(timezone.utc).isoformat()}
 
 
 def _source_hardware(src_args: dict, instance_uuid: str) -> dict:
@@ -725,11 +841,10 @@ async def start_cutover(job_id: uuid.UUID, body: JobCutoverRequest,
     _set_state(job, "QUIESCING")
     await db.commit()
     try:
-        with VSphereClient(src_args["host"], src_args["user"], src_args["password"],
-                           port=src_args["port"], verify=src_args["verify_tls"]) as client:
-            vm = client.find_vm(instance_uuid=job.src_instance_uuid)
-            mode = await run_in_threadpool(vm.shutdown_guest)
-            await _log(db, job.id, f"VM source arrêtée ({mode}) — prêt pour le delta final")
+        mode, network = await run_in_threadpool(_shutdown_source, src_args, job.src_instance_uuid)
+        job.spec = {**job.spec, "network_source": _merge_source_network(
+            job.spec.get("network_source"), network)}
+        await _log(db, job.id, f"VM source arrêtée ({mode}) — prêt pour le delta final")
     except VSphereError as exc:
         _set_state(job, "SYNCED")
         await _log(db, job.id, f"extinction de la VM source échouée : {exc}", "error")

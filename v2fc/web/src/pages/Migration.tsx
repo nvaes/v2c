@@ -212,6 +212,59 @@ function GuestDrivers({ job }: { job: JobOut }) {
   );
 }
 
+type NetworkSpec<T> = { nics: T[]; read_at: string };
+type SourceNicSpec = { device_key: number; label: string; mac: string; network: string; ips: string[] };
+type TargetNicSpec = { name: string; mac: string; network: string; ips: string[] };
+
+// Ligne « Réseau » (03/11/2026) : par carte, réseau et IP de la VM source
+// (relevés après chaque seed/delta et juste avant l'extinction) puis, après
+// la bascule, réseau, MAC et IP de la VM cible (cartes créées dans l'ordre
+// des cartes source mappées, cf. jobs._target_nics).
+function JobNetwork({ job, vm, busy, onRefresh }: {
+  job: JobOut; vm: PlanVmOut; busy: boolean; onRefresh: () => void;
+}) {
+  const src = job.spec?.network_source as NetworkSpec<SourceNicSpec> | undefined;
+  const tgt = job.spec?.network_target as NetworkSpec<TargetNicSpec> | undefined;
+  const mapped = vm.nic_mappings.filter((m) => m.tgt_network_urn)
+    .sort((a, b) => a.device_key - b.device_key);
+  const srcNics: SourceNicSpec[] = src?.nics ?? vm.nic_mappings.map((m) => ({
+    device_key: m.device_key, label: m.label, mac: m.mac, network: m.src_network, ips: [],
+  }));
+  if (srcNics.length === 0 && !tgt) return null;
+  const ips = (list: string[]) => (list.length > 0 ? list.join(", ") : "IP inconnue");
+  return (
+    <div className="muted" style={{ margin: "4px 0" }}>
+      Réseau{" "}
+      <button
+        className="secondary"
+        style={{ padding: "0 6px", fontSize: 12 }}
+        disabled={busy}
+        onClick={onRefresh}
+        title="Relire sur vCenter et FusionCompute"
+      >
+        {busy ? "…" : "actualiser"}
+      </button>
+      {srcNics.map((n) => {
+        const m = vm.nic_mappings.find((x) => x.device_key === n.device_key);
+        const idx = mapped.findIndex((x) => x.device_key === n.device_key);
+        const t = idx >= 0 ? tgt?.nics[idx] : undefined;
+        return (
+          <div key={n.device_key} style={{ marginLeft: 12 }}>
+            {n.label} : {n.network || "?"} — {ips(n.ips)} →{" "}
+            {!m?.tgt_network_urn ? (
+              "non recréée"
+            ) : t ? (
+              <>{t.network} — {t.mac} — {t.ips.length > 0 ? t.ips.join(", ") : "IP pas encore remontée"}</>
+            ) : (
+              <>{m.tgt_network_name ?? m.tgt_network_urn}{m.keep_mac ? ` — ${m.mac}` : ""}</>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Popup avant de migrer une VM Windows (28/10/2026) : V2FC n'injecte aucun
 // pilote dans Windows (seul Linux est converti au delta final), ils doivent
 // être installés dans la VM source. Avant le premier seed, et à la bascule
@@ -298,6 +351,15 @@ const LOG_LEVEL_CLASS: Record<string, string | undefined> = {
 // Popup de suivi de la bascule (27/10/2026) : état, avancement du delta
 // final et journal du job, relus toutes les 2 s (même source que la page
 // Logs). Fermer le popup n'interrompt rien.
+// Relecture du journal avec 2 min de recouvrement, doublons écartés par id
+// (03/11/2026) : l'horodatage d'une ligne est celui du début de la
+// transaction qui l'écrit, une ligne validée après la relecture précédente
+// peut donc être plus ancienne que la dernière reçue.
+function overlap(at: string | undefined): string | undefined {
+  if (!at) return undefined;
+  return new Date(new Date(at + "Z").getTime() - 120_000).toISOString().replace("Z", "");
+}
+
 function CutoverMonitor({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   const [job, setJob] = useState<JobOut | null>(null);
   const [entries, setEntries] = useState<JobLogEntryOut[]>([]);
@@ -310,13 +372,17 @@ function CutoverMonitor({ jobId, onClose }: { jobId: string; onClose: () => void
     async function poll() {
       try {
         const [j, logs] = await Promise.all([
-          api.getJob(jobId), api.getJobLogs(jobId, lastAt.current),
+          api.getJob(jobId), api.getJobLogs(jobId, overlap(lastAt.current)),
         ]);
         if (cancelled) return;
         setJob(j);
         if (logs.entries.length > 0) {
           lastAt.current = logs.entries[logs.entries.length - 1].at;
-          setEntries((prev) => [...prev, ...logs.entries]);
+          setEntries((prev) => {
+            const seen = new Set(prev.map((e) => e.id));
+            const added = logs.entries.filter((e) => !seen.has(e.id));
+            return added.length > 0 ? [...prev, ...added] : prev;
+          });
         }
         setError(null);
       } catch (err) {
@@ -606,6 +672,20 @@ export default function MigrationPage() {
     }
   }
 
+  // Clé distincte de job.id : l'actualisation ne grise pas les boutons du job.
+  async function refreshNetwork(jobId: string) {
+    setBusyKey(`net-${jobId}`);
+    setError(null);
+    try {
+      await api.refreshJobNetwork(jobId);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function retryFinalize(jobId: string) {
     setBusyKey(jobId);
     setError(null);
@@ -765,6 +845,14 @@ export default function MigrationPage() {
                 {job && <RoundProgress job={job} />}
                 {job && <RoundHistory job={job} />}
                 {job && <GuestDrivers job={job} />}
+                {job && (
+                  <JobNetwork
+                    job={job}
+                    vm={vm}
+                    busy={busyKey === `net-${job.id}`}
+                    onRefresh={() => refreshNetwork(job.id)}
+                  />
+                )}
 
                 {job && !job.relay_id && ROUND_KIND_FOR_STATE[job.state] && (
                   <div>

@@ -2145,3 +2145,36 @@ seulement dans le DriverStore »), et « Migrer maintenant » rouvrait le popup.
   « Pilotes virtio » passe à réseau présent.
 - Tests : `tests/test_guest_drivers.py` (faux Windows : fichiers, DriverStore,
   ruche SYSTEM).
+
+## 47. Popup de bascule figé ; ligne « Réseau » (03/11/2026)
+
+Constat sur la première bascule Windows : le popup de suivi restait figé.
+Les journaux d'accès montrent qu'après chaque ouverture plus aucune requête
+n'aboutissait (page comprise), puis des rafales à la fin de la finalisation.
+
+- `_finalize` appelait le client FusionCompute (connexion, détachement,
+  création de VM, attachement, démarrage, `wait_task`) directement dans le
+  gestionnaire async : boucle de l'API bloquée ~15 s, toute l'interface
+  figée. Chaque appel passe désormais par `run_in_threadpool`, et chaque
+  ligne du journal est validée à son étape (avant : une seule transaction,
+  journal visible seulement à la fin, toutes les lignes au même horodatage).
+- `start_cutover` : connexion vCenter + extinction dans un seul appel en
+  thread (`_shutdown_source`).
+- Popup : `JobLogEntry.at` = début de la transaction qui écrit la ligne ;
+  une ligne validée tard peut être plus ancienne que la dernière reçue et
+  était perdue par `?since=`. Relecture avec 2 min de recouvrement,
+  doublons écartés par id.
+- Ligne « Réseau » (page Migration) : `job.spec.network_source` (cartes,
+  réseau VMware, IP par `guest.net[].deviceConfigId`, lien-local écarté)
+  relevé après chaque seed/delta (`report_round`) et dans `start_cutover`
+  avant l'extinction ; une carte sans IP garde celles du relevé précédent.
+  `job.spec.network_target` (port group, MAC, `ipList`/`ips6` du VRM,
+  0.0.0.0 = inconnu) relevé en fin de finalisation. Appariement
+  source → cible : cartes source mappées triées par clé ↔ cartes cible
+  par `sequenceNum` (ordre de création de `_target_nics`).
+  `POST /jobs/{id}/network` (lecteur) relit les deux côtés (bouton
+  « actualiser »). Pas de lecture vCenter/VRM au rafraîchissement 5 s.
+- Vérifié sur le job migré : cible lue (port groups, MAC, IP de la
+  première carte remontée par les outils FusionCompute) ; IP source
+  inconnues car VM déjà éteinte avant cette version.
+- Tests : `tests/test_job_network.py`.

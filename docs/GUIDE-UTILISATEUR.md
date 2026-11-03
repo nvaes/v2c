@@ -162,6 +162,18 @@ souhaité) :
    correspondant et les cartes réseau du plan, puis rattachement des
    volumes.
 
+Le popup de suivi (**Suivre la bascule**, puis **Détail de la bascule** une
+fois terminée) affiche chaque étape et le journal au fil de l'eau ; le
+fermer n'interrompt rien.
+
+**Ligne « Réseau »** de chaque VM : pour chaque carte, le réseau VMware et
+les IP de la VM source, puis le réseau FusionCompute, la MAC et les IP de la
+VM cible. Les IP source sont relevées après chaque seed et delta et juste
+avant l'extinction (une VM éteinte ne les remonte plus) ; les IP cible
+apparaissent quand les outils FusionCompute de la VM migrée les remontent.
+**actualiser** relit les deux côtés. Une carte cible sans IP alors que la
+source en avait une : l'adresse fixe est à reconfigurer (voir ci-dessous).
+
 Si la finalisation est interrompue (erreur FusionCompute), corriger la cause
 indiquée dans les Logs puis **Relancer la finalisation** : les étapes déjà
 faites sont sautées.
