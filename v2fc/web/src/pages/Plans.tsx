@@ -52,7 +52,9 @@ export default function PlansPage() {
     setError(null);
     try {
       const jobs = (await api.listJobs()).filter((j) => j.plan_id === plan.id);
-      const unfinished = jobs.filter((j) => j.state !== "CUTOVER_DONE");
+      // Volumes supprimés seulement si aucune VM cible n'a été créée (après
+      // un rollback, ils restent attachés à la VM FusionCompute conservée).
+      const unfinished = jobs.filter((j) => j.state !== "CUTOVER_DONE" && !j.tgt_vm_uri);
       let message = `Supprimer le plan « ${plan.name} » (${plan.vms.length} VM) ?`;
       if (jobs.length > 0) {
         message += `\n\n${jobs.length} job(s) de migration et leur historique seront aussi supprimés.`;
@@ -62,7 +64,7 @@ export default function PlansPage() {
           .map((j) => j.src_vm_name).join(", ")} (migration non terminée) seront supprimés.`;
       }
       if (jobs.length > unfinished.length) {
-        message += "\nLes VM déjà migrées restent intactes sur FusionCompute.";
+        message += "\nLes VM déjà créées sur FusionCompute restent intactes, avec leurs disques.";
       }
       if (!window.confirm(message)) return;
       setDeleteLog({ planName: plan.name, lines: [], status: "running" });

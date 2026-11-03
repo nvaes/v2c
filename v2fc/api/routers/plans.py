@@ -231,7 +231,9 @@ async def delete_plan(plan_id: uuid.UUID, with_jobs: bool = False, delete_volume
     FusionCompute les volumes des migrations non terminées — copies
     partielles qui occuperaient sinon des emplacements disque du relais.
     Les volumes d'une migration terminée (CUTOVER_DONE) appartiennent à la
-    VM migrée : jamais touchés.
+    VM migrée : jamais touchés. Idem dès que la VM cible a été créée
+    (`tgt_vm_uri`), même après un rollback (03/11/2026) : les volumes y sont
+    attachés et la VM cible n'est jamais supprimée par l'application.
 
     Avec `stream=true` (27/10/2026) : après les vérifications (erreurs HTTP
     habituelles), répond 200 en NDJSON — une ligne `{"t","level","msg"}` par
@@ -323,6 +325,10 @@ async def _delete_plan_work(db: AsyncSession, plan: Plan, jobs: list[Job], delet
         for job in jobs:
             if job.state == "CUTOVER_DONE":
                 log("info", f"{job.src_vm_name} : migration terminée, volumes conservés")
+                continue
+            if job.tgt_vm_uri:
+                log("info", f"{job.src_vm_name} : VM cible créée sur FusionCompute "
+                            f"({job.state}), volumes conservés avec elle")
                 continue
             try:
                 await _release_volumes(db, job, log)

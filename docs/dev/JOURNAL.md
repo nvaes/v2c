@@ -2196,3 +2196,19 @@ répondait 500 et le job restait en ROLLBACK, bouton masqué.
   nom et les mêmes IP. Échec de l'arrêt propre : erreur, à arrêter à la main.
 - Appels vCenter/VRM en thread ; ROLLBACK ajouté à `_ROLLBACK_FROM`
   (reprise), bouton « Relancer le rollback » dans l'interface.
+
+## 49. Suppression d'un plan après rollback ; filet d'erreur d'affichage (03/11/2026)
+
+Constat : après un rollback, « Supprimer » le plan échouait (page blanche
+signalée) et le plan restait.
+
+- Le job revenu en arrière (ROLLED_BACK) n'est plus CUTOVER_DONE : la
+  suppression traitait son volume comme une copie partielle et tentait de
+  le supprimer, alors qu'il est attaché à la VM cible conservée. Le VRM a
+  refusé (volume « USE »), rien n'a été supprimé. Désormais, tout job avec
+  `tgt_vm_uri` garde ses volumes (`_delete_plan_work`), et le message de
+  confirmation de la page Plans en tient compte.
+- Page blanche non reproduite (rendu jsdom de la page Plans avec les
+  données réelles et un flux d'erreur : l'erreur s'affiche). Ajout d'un
+  `ErrorBoundary` autour de l'application (`web/src/ErrorBoundary.tsx`) :
+  une exception de rendu affiche message et pile au lieu d'une page blanche.
