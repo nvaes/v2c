@@ -49,7 +49,9 @@ _SEED_STATES = {"SEEDING"}
 _DELTA_STATES = {"SYNCED", "SYNCING"}
 _FINAL_STATES = {"FINAL_DELTA"}
 _CUTOVER_FROM = {"SYNCED"}
-_ROLLBACK_FROM = {"CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA", "FINALIZING", "CUTOVER_DONE"}
+# ROLLBACK : reprise d'un rollback interrompu par une erreur.
+_ROLLBACK_FROM = {"CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA", "FINALIZING", "CUTOVER_DONE",
+                  "ROLLBACK"}
 
 
 async def _load_job_full(db: AsyncSession, job_id: uuid.UUID) -> dict:
@@ -788,6 +790,30 @@ def _target_network(fc_nics: list[dict]) -> dict:
     return {"nics": out, "read_at": datetime.now(timezone.utc).isoformat()}
 
 
+def _power_on_source(src_args: dict, instance_uuid: str) -> bool:
+    """Rallume la VM source si elle est éteinte ; False si déjà allumée."""
+    with VSphereClient(src_args["host"], src_args["user"], src_args["password"],
+                       port=src_args["port"], verify=src_args["verify_tls"]) as client:
+        vm = client.find_vm(instance_uuid=instance_uuid)
+        if vm.power_state != "poweredOff":
+            return False
+        vm.power_on_for_rollback()
+        return True
+
+
+def _stop_target_vm(tgt_args: dict, port: int | None, verify_tls: bool, vm_uri: str) -> str:
+    """Arrêt propre de la VM cible (jamais forcé : en cas d'échec, l'arrêter
+    à la main dans FusionCompute puis relancer le rollback). Renvoie ce qui a
+    été fait, pour le journal."""
+    vm_id = vm_uri.rstrip("/").rsplit("/", 1)[-1]
+    with fc.FusionComputeClient(tgt_args["host"], tgt_args["user"], tgt_args["password"],
+                                port=port or fc.DEFAULT_API_PORT, verify=verify_tls) as client:
+        if client.get_vm(vm_id).get("status") == "stopped":
+            return "déjà arrêtée"
+        client.wait_task(client.power_off(vm_id, mode="safe")["taskUri"])
+        return "arrêtée proprement"
+
+
 def _source_hardware(src_args: dict, instance_uuid: str) -> dict:
     with VSphereClient(src_args["host"], src_args["user"], src_args["password"],
                        port=src_args["port"], verify=src_args["verify_tls"]) as client:
@@ -864,6 +890,10 @@ async def rollback_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     Rollback = rallumer la source (§4, invariant I1/promesse de rollback) —
     jamais de suppression de la cible : l'utilisateur la nettoie lui-même s'il le
     souhaite, ce driver ne détruit rien de sa propre initiative (I1).
+
+    03/11/2026 : la VM cible déjà démarrée est d'abord arrêtée (pas
+    supprimée), sinon source et cible tournent avec le même nom et les mêmes
+    IP. Erreur : le job reste en ROLLBACK, rollback relançable.
     """
     job = await db.get(Job, job_id)
     if job is None:
@@ -875,22 +905,34 @@ async def rollback_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     source = await db.get(Endpoint, job.source_id)
     src_args = await _connection_args(db, source)
     _set_state(job, "ROLLBACK")
+    await _log(db, job.id, "rollback démarré")
     await db.commit()
+
+    if job.tgt_vm_uri:
+        target = await db.get(Endpoint, job.target_id)
+        tgt_args = await _connection_args(db, target)
+        try:
+            stopped = await run_in_threadpool(_stop_target_vm, tgt_args, target.port,
+                                              target.verify_tls, job.tgt_vm_uri)
+        except fc.FusionComputeError as exc:
+            await _log(db, job.id, f"rollback échoué (arrêt de la VM cible) : {exc} — "
+                                   f"l'arrêter dans FusionCompute puis relancer le rollback",
+                       "error")
+            await db.commit()
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail=f"arrêt de la VM cible impossible : {exc}") from exc
+        await _log(db, job.id, f"VM cible FusionCompute {stopped} (conservée, non supprimée)")
+        await db.commit()
+
     try:
-        with VSphereClient(src_args["host"], src_args["user"], src_args["password"],
-                           port=src_args["port"], verify=src_args["verify_tls"]) as client:
-            vm = client.find_vm(instance_uuid=job.src_instance_uuid)
-            if vm.power_state == "poweredOff":
-                await run_in_threadpool(
-                    lambda: client.wait_task(vm.guarded.PowerOnVM_Task(), label="PowerOnVM"))
-                await _log(db, job.id, "VM source redémarrée — rollback effectué")
-            else:
-                await _log(db, job.id, "VM source déjà allumée — rien à faire")
+        powered_on = await run_in_threadpool(_power_on_source, src_args, job.src_instance_uuid)
     except VSphereError as exc:
         await _log(db, job.id, f"rollback échoué (VM source) : {exc}", "error")
         await db.commit()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
                             detail=f"redémarrage de la source impossible : {exc}") from exc
+    await _log(db, job.id, "VM source redémarrée — rollback effectué" if powered_on
+               else "VM source déjà allumée — rollback effectué")
 
     _set_state(job, "ROLLED_BACK")
     await db.commit()

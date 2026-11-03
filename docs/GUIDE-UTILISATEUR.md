@@ -178,8 +178,12 @@ Si la finalisation est interrompue (erreur FusionCompute), corriger la cause
 indiquée dans les Logs puis **Relancer la finalisation** : les étapes déjà
 faites sont sautées.
 
-**Annuler / rollback** (pendant ou après la bascule) : rallume la VM source. La VM
-FusionCompute éventuellement créée n'est jamais supprimée automatiquement.
+**Annuler / rollback** (pendant ou après la bascule) : arrête proprement la VM
+FusionCompute si elle tourne (pour ne pas avoir deux machines avec le même
+nom et les mêmes IP), puis rallume la VM source. La VM FusionCompute n'est
+jamais supprimée automatiquement. Si une étape échoue (par exemple l'arrêt
+propre refusé), l'erreur s'affiche et est dans les Logs : corriger, puis
+**Relancer le rollback**.
 
 ### Après la bascule — à faire dans la VM migrée
 

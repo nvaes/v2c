@@ -2178,3 +2178,21 @@ n'aboutissait (page comprise), puis des rafales à la fin de la finalisation.
   première carte remontée par les outils FusionCompute) ; IP source
   inconnues car VM déjà éteinte avant cette version.
 - Tests : `tests/test_job_network.py`.
+
+## 48. Rollback : source jamais rallumée (03/11/2026)
+
+Constat : clic sur « Annuler / rollback » sans effet visible ; l'API
+répondait 500 et le job restait en ROLLBACK, bouton masqué.
+
+- `rollback_job` appelait `vm.guarded.PowerOnVM_Task()` : refusé par
+  `SourceGuard` (PowerOnVM_Task est dans FORBIDDEN, « décision de rollback
+  prise par l'orchestrateur »), `SourceMutationRefused` non rattrapée. Le
+  rollback n'avait jamais pu fonctionner.
+- `SourceVm.power_on_for_rollback()` : appel explicite sur l'objet brut,
+  seul chemin de rallumage ; le garde-fou refuse toujours PowerOnVM_Task
+  (test dans `tests/test_source_driver.py`).
+- Avant de rallumer la source, la VM cible FusionCompute est arrêtée
+  (`mode=safe`, jamais forcé ; conservée), sinon deux machines avec le même
+  nom et les mêmes IP. Échec de l'arrêt propre : erreur, à arrêter à la main.
+- Appels vCenter/VRM en thread ; ROLLBACK ajouté à `_ROLLBACK_FROM`
+  (reprise), bouton « Relancer le rollback » dans l'interface.

@@ -700,7 +700,8 @@ export default function MigrationPage() {
   }
 
   async function rollback(jobId: string) {
-    if (!window.confirm("Annuler la bascule et rallumer la VM source ?")) return;
+    if (!window.confirm("Annuler la bascule ? La VM cible FusionCompute sera arrêtée (pas " +
+      "supprimée) puis la VM source rallumée.")) return;
     setBusyKey(jobId);
     setError(null);
     try {
@@ -911,8 +912,8 @@ export default function MigrationPage() {
                   </p>
                 )}
 
-                {job && ["CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA", "FINALIZING", "CUTOVER_DONE"]
-                  .includes(job.state) && (
+                {job && ["CUTOVER_PENDING", "QUIESCING", "FINAL_DELTA", "FINALIZING", "CUTOVER_DONE",
+                  "ROLLBACK"].includes(job.state) && (
                   <p>
                     <button
                       className="secondary"
@@ -922,7 +923,8 @@ export default function MigrationPage() {
                       {job.state === "CUTOVER_DONE" ? "Détail de la bascule" : "Suivre la bascule"}
                     </button>
                     <button className="secondary" disabled={busyKey === job.id} onClick={() => rollback(job.id)}>
-                      {busyKey === job.id ? "…" : "Annuler / rollback"}
+                      {busyKey === job.id ? "…"
+                        : job.state === "ROLLBACK" ? "Relancer le rollback" : "Annuler / rollback"}
                     </button>
                   </p>
                 )}

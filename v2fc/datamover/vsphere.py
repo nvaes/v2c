@@ -701,6 +701,13 @@ class SourceVm:
         self.client.wait_task(self.guarded.PowerOffVM_Task(), label="PowerOffVM")
         return "forced"
 
+    def power_on_for_rollback(self) -> None:
+        """Rallume la source : seule exception à PowerOnVM_Task (FORBIDDEN
+        pour le driver), appelée uniquement par le rollback de
+        l'orchestrateur (api/routers/jobs.py). Passe par l'objet brut, le
+        garde-fou continuant de refuser tout autre appel."""
+        self.client.wait_task(self.raw.PowerOnVM_Task(), label="PowerOnVM")
+
     def annotate(self, key: str, value: str) -> None:
         """Marque la source après bascule, sans rien modifier d'autre."""
         self.guarded.SetCustomValue(key=key, value=value)

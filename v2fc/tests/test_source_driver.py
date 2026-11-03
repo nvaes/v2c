@@ -525,3 +525,21 @@ def test_nics_lists_each_card_with_its_source_network():
     assert nics[0] == {"device_key": 4000, "label": "Network adapter 1", "adapter": "Vmxnet3",
                        "mac": "00:50:56:a8:37:de", "network": "dvportgroup-12"}
     assert nics[1]["adapter"] == "E1000e" and nics[1]["network"] == "VM Network"
+
+
+def test_rollback_rallume_la_source_hors_garde_fou():
+    """PowerOnVM_Task reste refusée par le garde-fou ; seul
+    power_on_for_rollback (rollback de l'orchestrateur) l'appelle."""
+    from types import SimpleNamespace
+    from datamover.vsphere import SourceVm, SourceMutationRefused
+    calls = []
+    raw = SimpleNamespace(PowerOnVM_Task=lambda: calls.append("on") or "task")
+    client = SimpleNamespace(wait_task=lambda task, label="": calls.append(task))
+    vm = SourceVm(client, raw)
+    try:
+        vm.guarded.PowerOnVM_Task()
+        raise AssertionError("garde-fou contourné")
+    except SourceMutationRefused:
+        pass
+    vm.power_on_for_rollback()
+    assert calls == ["on", "task"]
