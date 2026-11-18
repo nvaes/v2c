@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, InventoryProgress, InventoryResponse, InventoryVm } from "../api";
+import { api, InventoryProgress, InventoryResponse, InventoryVm, RelayCapacity } from "../api";
 
 type SortKey = "name" | "dc" | "power_state" | "num_disks" | "disk_capacity_gb"
   | "cbt_enabled" | "firmware" | "migratable";
@@ -28,6 +28,7 @@ export default function InventoryPage() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [progress, setProgress] = useState<InventoryProgress | null>(null);
+  const [relayCap, setRelayCap] = useState<RelayCapacity[] | null>(null);
 
   function load(refresh = false) {
     if (!id) return;
@@ -42,6 +43,14 @@ export default function InventoryPage() {
   }
 
   useEffect(() => load(), [id]);
+
+  // Emplacements virtio des relais (25 disques au plus, système compris) :
+  // le provisioning refuse une VM qui n'y tient pas, on prévient donc dès la
+  // création du plan (18/11/2026). Indicatif : pas bloquant.
+  function loadRelayCap() {
+    api.relaysCapacity().then(setRelayCap).catch(() => setRelayCap(null));
+  }
+  useEffect(loadRelayCap, []);
 
   // Poll la progression pendant qu'un scan tourne (GET .../inventory/progress,
   // demande utilisateur du 17/09/2026) — purement indicatif : la réponse de
@@ -123,6 +132,10 @@ export default function InventoryPage() {
   async function createPlan(e: FormEvent) {
     e.preventDefault();
     if (!id) return;
+    if (capShort && !window.confirm(
+      `Relais : ${usedSlots} disques sur ${totalSlots} déjà attachés, ${freeSlots} place(s) libre(s) ` +
+      `pour ${selectedDisks} disque(s) sélectionné(s). Le provisioning sera refusé tant que ` +
+      `d'autres migrations ne sont pas terminées ou supprimées. Créer le plan quand même ?`)) return;
     setCreating(true);
     setError(null);
     try {
@@ -138,6 +151,7 @@ export default function InventoryPage() {
       setCreatedPlanId(plan.id);
       setSelected({});
       setPlanName("");
+      loadRelayCap();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -146,6 +160,14 @@ export default function InventoryPage() {
   }
 
   const selectedCount = Object.keys(selected).length;
+  const selectedDisks = Object.values(selected).reduce((n, vm) => n + vm.num_disks, 0);
+  const knownCap = (relayCap ?? []).filter((r) => r.used !== null);
+  const freeSlots = knownCap.reduce((n, r) => n + Math.max(0, r.total - (r.used ?? 0)), 0);
+  const usedSlots = knownCap.reduce((n, r) => n + (r.used ?? 0), 0);
+  const totalSlots = knownCap.reduce((n, r) => n + r.total, 0);
+  const capErrors = (relayCap ?? []).filter((r) => r.error);
+  const relaysFull = knownCap.length > 0 && freeSlots === 0;
+  const capShort = knownCap.length > 0 && selectedDisks > freeSlots;
 
   return (
     <>
@@ -262,6 +284,27 @@ export default function InventoryPage() {
               <label>Nom du plan</label>
               <input value={planName} onChange={(e) => setPlanName(e.target.value)} required />
             </div>
+            {knownCap.length > 0 && (
+              <p className={relaysFull || capShort ? "error" : "muted"} style={{ marginTop: 0 }}>
+                {relaysFull
+                  ? `⚠ Relais plein : ${usedSlots} disques sur ${totalSlots}. Aucune VM ne pourra être ` +
+                    "provisionnée avant la fin ou la suppression d'autres migrations."
+                  : capShort
+                  ? `⚠ Relais : ${usedSlots} disques sur ${totalSlots}, ${freeSlots} place(s) libre(s) ` +
+                    `pour ${selectedDisks} disque(s) sélectionné(s) — certaines VM ne pourront pas ` +
+                    "être provisionnées tout de suite."
+                  : `Relais : ${usedSlots} disques sur ${totalSlots} (${freeSlots} place(s) libre(s)` +
+                    `${selectedCount ? `, ${selectedDisks} disque(s) sélectionné(s)` : ""}).`}{" "}
+                <button type="button" className="secondary" onClick={loadRelayCap}>
+                  actualiser
+                </button>
+              </p>
+            )}
+            {capErrors.length > 0 && (
+              <p className="muted">
+                Capacité du relais illisible : {capErrors.map((r) => r.error).join(" ; ")}
+              </p>
+            )}
             <button type="submit" disabled={creating || selectedCount === 0}>
               {creating ? "Création…" : `Créer le plan (${selectedCount} VM)`}
             </button>

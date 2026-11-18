@@ -2227,3 +2227,22 @@ Erreur affichée par l'ErrorBoundary (§49) à la suppression d'un plan.
 - Corps d'effet entre accolades. Reproduit en jsdom (scrollIntoView
   renvoyant une Promise) : plantage avant, page intacte après.
 - Règle : jamais d'effet à corps-expression qui appelle une API DOM.
+
+## 51. Alerte de capacité du relais à la création du plan (18/11/2026)
+
+Le refus au provisioning (« le relais porte déjà 25 disques sur 25 ») tombait
+tard, une fois le plan monté et le job créé.
+
+- Origine de la limite : les volumes cibles sont attachés au relais en
+  VirtIO (`createattachvol`), 25 disques au plus par VM sur FusionCompute
+  (§7.4), disque système du relais compris. Ils y restent jusqu'à
+  FINALIZING ; jobs en attente, en échec ou abandonnés occupent donc des
+  emplacements.
+- `GET /api/v1/relays/capacity` : disques attachés à chaque relais, lus en
+  direct (`get_vm(...).vmConfig.disks`, même comptage que
+  `jobs._capacity_problem`). Relais ou VRM injoignable : `used` null et
+  `error`, sans faire échouer les autres.
+- Inventaire, formulaire « Créer un plan » : ligne d'état du relais
+  (occupés/total, places libres, disques sélectionnés), en rouge si le relais
+  est plein ou si la sélection ne tient pas ; confirmation avant création
+  dans ce cas. Non bloquant : le refus au provisioning reste le garde-fou.

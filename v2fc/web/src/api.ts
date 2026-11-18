@@ -142,6 +142,8 @@ export const api = {
 
   // -- relais (VM agent FusionCompute, §7.1/§13) --------------------------
   listRelays: () => request<RelayOut[]>("/relays"),
+  // emplacements virtio occupés sur chaque relais, lus en direct sur FusionCompute
+  relaysCapacity: () => request<RelayCapacity[]>("/relays/capacity"),
   createRelay: (body: RelayCreate) =>
     request<RelayOut>("/relays", { method: "POST", body: JSON.stringify(body) }),
   deleteRelay: (id: string) => request<void>(`/relays/${id}`, { method: "DELETE" }),
@@ -293,6 +295,9 @@ export interface RelayCreate {
 export interface RelayOut {
   id: string; target_id: string; fc_vm_uri: string; agent_url: string;
   max_slots: number; used_slots: number; status: string;
+}
+export interface RelayCapacity {
+  relay_id: string; target_id: string; used: number | null; total: number; error: string | null;
 }
 
 export interface JobCreate { plan_vm_id: string; relay_id?: string | null; }

@@ -293,6 +293,15 @@ class RelayOut(BaseModel):
     status: str
 
 
+class RelayCapacity(BaseModel):
+    """Emplacements virtio d'un relais (25 au plus, disque système compris)."""
+    relay_id: uuid.UUID
+    target_id: uuid.UUID
+    used: int | None
+    total: int
+    error: str | None = None
+
+
 # --------------------------------------------------------------------------
 # Jobs — ARCHITECTURE.md §5 (machine à états) et §8.1. Ajouté le 17/09/2026
 # à la demande explicite de l'utilisateur (onglets Migration/Logs), une fois L1
