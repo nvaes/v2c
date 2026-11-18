@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, EndpointOut, PlanDeleteLogLine, PlanOut, PlanPreflightResponse } from "../api";
+import AutoPlansModal from "./AutoPlans";
 
 export default function PlansPage() {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export default function PlansPage() {
     error?: string;
   } | null>(null);
   const logEnd = useRef<HTMLDivElement>(null);
+  const [autoOpen, setAutoOpen] = useState(false);
 
   // Corps entre accolades : scrollIntoView renvoie une Promise dans les
   // navigateurs récents, que React prendrait pour la fonction de nettoyage
@@ -90,7 +92,16 @@ export default function PlansPage() {
 
   return (
     <>
-      <h1>Plans de migration</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <h1>Plans de migration</h1>
+        <button style={{ marginLeft: "auto" }} onClick={() => setAutoOpen(true)}>
+          Migration complète : générer les plans
+        </button>
+      </div>
+      {autoOpen && (
+        <AutoPlansModal endpoints={Object.values(endpoints)} onClose={() => setAutoOpen(false)}
+                        onCreated={refresh} />
+      )}
       <p className="muted">
         Un plan fige une liste de VM sélectionnées depuis un environnement source. La
         pré-vérification (§ preflight) n'est pas rejouée automatiquement : les VM peuvent avoir

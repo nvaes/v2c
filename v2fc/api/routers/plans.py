@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
-from .. import vsphere_bridge
+from .. import plan_auto, vsphere_bridge
+from ..cache import get_cached_inventory
 from ..db import get_db, get_session_factory
 from ..models import Credential, Endpoint, Job, JobDisk, Plan, PlanVm, Relay, SyncRound, User
-from ..schemas import (PlanCreate, PlanOut, PlanPreflightResponse, PlanTargetUpdate,
+from ..schemas import (PlanAutoRequest, PlanAutoResponse, PlanCreate, PlanOut, PlanPreflightResponse, PlanTargetUpdate,
                        PlanVmMappingUpdate, SourceGuest, SourceNic)
 from ..security import decrypt_credential_password, require_role
 from .jobs import _connection_args
@@ -45,6 +46,43 @@ async def create_plan(body: PlanCreate, db: AsyncSession = Depends(get_db),
     result = await db.execute(
         select(Plan).where(Plan.id == plan.id).options(selectinload(Plan.vms)))
     return result.scalar_one()
+
+
+@router.post("/auto", response_model=PlanAutoResponse)
+async def auto_plans(body: PlanAutoRequest, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(require_role("operator"))) -> dict:
+    """
+    Migration complète d'une source : découpe son dernier inventaire connu en
+    plans (voir api/plan_auto.py pour les critères). `dry_run` (défaut) ne
+    fait que proposer ; sinon les plans sont créés, sans cible.
+    """
+    source = await db.get(Endpoint, body.source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="endpoint source introuvable")
+    inventory = await get_cached_inventory(body.source_id)
+    if inventory is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=f"aucun inventaire connu pour {source.name} — ouvrir "
+                                   "« Voir les VM » de cet environnement d'abord")
+    planned = set((await db.execute(
+        select(PlanVm.src_instance_uuid).join(Plan).where(Plan.source_id == body.source_id)
+    )).scalars())
+    result = plan_auto.generate(inventory, planned, prefix=body.prefix or source.name,
+                                max_disks=body.max_disks, max_capacity_gb=body.max_capacity_gb,
+                                max_vms=body.max_vms, pilot_size=body.pilot_size,
+                                group_by=tuple(body.group_by))
+    result["created"] = []
+    if not body.dry_run:
+        for p in result["plans"]:
+            plan = Plan(name=p["name"], source_id=body.source_id, created_by=user.id)
+            plan.vms = [PlanVm(src_vm_moref=v["moref"], src_instance_uuid=v["instance_uuid"],
+                               src_vm_name=v["name"]) for v in p["vms"]]
+            db.add(plan)
+            await db.flush()
+            result["created"].append(plan.id)
+        await db.commit()
+    return result
 
 
 @router.get("", response_model=list[PlanOut])

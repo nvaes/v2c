@@ -2246,3 +2246,29 @@ tard, une fois le plan monté et le job créé.
   (occupés/total, places libres, disques sélectionnés), en rouge si le relais
   est plein ou si la sélection ne tient pas ; confirmation avant création
   dans ce cas. Non bloquant : le refus au provisioning reste le garde-fou.
+
+## 52. Migration complète : génération automatique des plans (18/11/2026)
+
+Bouton « Migration complète : générer les plans » sur la page Plans
+(`web/src/pages/AutoPlans.tsx`) → `POST /api/v1/plans/auto` (`dry_run` par
+défaut : aperçu ; sinon création des plans, sans cible). Logique pure dans
+`api/plan_auto.py`, testée par `tests/test_plan_auto.py`.
+
+- Générique, rien de propre à un client : calcul sur le dernier inventaire
+  connu de la source choisie (bouton de rescan dans le popup), critères
+  réglables : disques/Go/VM max par plan, taille de la vague pilote,
+  regroupement par datacenter, famille d'OS (guestId VMware), état
+  d'alimentation ou préfixe de nom (premier segment avant - _ . espace).
+- Disques max par plan proposés d'après le relais réel :
+  `GET /relays/capacity` renvoie désormais `system` (disques du relais qui ne
+  sont pas des volumes de job connus) ; défaut = 25 - system (24 ici). Un
+  plan entier tient donc sur le relais vide.
+- Critères : VM migrables et pas déjà dans un plan de la même source ; VM
+  avec plus de disques que la limite écartée (à migrer seule) ; VM plus
+  grosse que la limite de Go seule dans son plan ; vague pilote V00 (petites,
+  éteintes et Linux d'abord) ; puis Linux, Autre, Windows, petites VM
+  d'abord. Le nom n'affiche que les critères qui distinguent vraiment les
+  groupes.
+- Analyse affichée avant création : répartitions OS/DC/état/nb de disques,
+  préfixes fréquents (indique si le regroupement par préfixe a du sens),
+  plus grosses VM, nombre minimal de remplissages du relais.

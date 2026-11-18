@@ -120,6 +120,9 @@ export const api = {
     }
     throw new Error("connexion interrompue — la suppression continue côté serveur, rafraîchir la page");
   },
+  // migration complète : plans générés depuis le dernier inventaire connu
+  autoPlans: (body: PlanAutoRequest) =>
+    request<PlanAutoResponse>("/plans/auto", { method: "POST", body: JSON.stringify(body) }),
   createPlan: (body: PlanCreate) =>
     request<PlanOut>("/plans", { method: "POST", body: JSON.stringify(body) }),
   planPreflight: (id: string) =>
@@ -256,6 +259,28 @@ export interface SourceNic {
   device_key: number; label: string; adapter: string; mac: string; network: string;
 }
 export interface SourceGuest { guest_id: string; guest_name: string; windows: boolean; }
+export interface PlanAutoRequest {
+  source_id: string; prefix: string; max_disks: number; max_capacity_gb: number;
+  max_vms: number; pilot_size: number; group_by: PlanAutoGroup[]; dry_run: boolean;
+}
+export type PlanAutoGroup = "dc" | "os" | "power" | "prefix";
+export interface PlanAutoAnalysis {
+  vm_total: number; vm_migratable: number; vm_already_planned: number; vm_to_plan: number;
+  disks_to_plan: number; capacity_gb_to_plan: number;
+  by_os: Record<string, number>; by_dc: Record<string, number>; by_power: Record<string, number>;
+  by_disks: Record<string, number>; prefixes: Record<string, number>;
+  largest: { name: string; num_disks: number; disk_capacity_gb: number }[];
+  over_max_disks: string[]; min_relay_rounds: number;
+}
+export interface PlanAutoPlan {
+  name: string; disks: number; capacity_gb: number;
+  vms: { moref: string; instance_uuid: string; name: string; num_disks: number;
+         disk_capacity_gb: number; os: string; power_state: string }[];
+}
+export interface PlanAutoResponse {
+  plans: PlanAutoPlan[]; excluded: { name: string; reason: string }[]; analysis: PlanAutoAnalysis;
+  max_disks: number; max_capacity_gb: number; created: string[];
+}
 export interface PlanOut {
   id: string; name: string; source_id: string; target_id: string | null;
   created_at: string; vms: PlanVmOut[];
@@ -297,7 +322,8 @@ export interface RelayOut {
   max_slots: number; used_slots: number; status: string;
 }
 export interface RelayCapacity {
-  relay_id: string; target_id: string; used: number | null; total: number; error: string | null;
+  relay_id: string; target_id: string; used: number | null; total: number;
+  system: number | null; error: string | null;
 }
 
 export interface JobCreate { plan_vm_id: string; relay_id?: string | null; }

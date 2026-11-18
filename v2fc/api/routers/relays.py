@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from ..db import get_db
-from ..models import Endpoint, Relay, User
+from ..models import Endpoint, JobDisk, Relay, User
 from ..schemas import RelayCapacity, RelayCreate, RelayOut
 from ..security import require_role
 from .jobs import _RELAY_VIRTIO_SLOTS, _connection_args
@@ -63,6 +63,10 @@ async def relays_capacity(db: AsyncSession = Depends(get_db),
     `error` (used à null), sans faire échouer les autres.
     """
     relays = list((await db.execute(select(Relay))).scalars())
+    # Volumes de migration connus (identifiant VRM en fin d'URI) : le reste
+    # des disques d'un relais lui est propre (système, données de l'agent).
+    job_volumes = {u.rstrip("/").rsplit("/", 1)[-1] for u in (await db.execute(
+        select(JobDisk.tgt_volume_uri).where(JobDisk.tgt_volume_uri.is_not(None)))).scalars()}
     out: list[dict] = []
     by_target: dict[uuid.UUID, list[Relay]] = {}
     for r in relays:
@@ -79,9 +83,12 @@ async def relays_capacity(db: AsyncSession = Depends(get_db),
                 for r in group:
                     vm_id = r.fc_vm_uri.rstrip("/").rsplit("/", 1)[-1]
                     try:
-                        used = len(client.get_vm(vm_id)["vmConfig"]["disks"])
+                        disks = client.get_vm(vm_id)["vmConfig"]["disks"]
+                        system = sum(1 for d in disks
+                                     if d.get("volumeUrn", "").rsplit(":", 1)[-1] not in job_volumes)
                         rows.append({"relay_id": r.id, "target_id": r.target_id,
-                                     "used": used, "total": _RELAY_VIRTIO_SLOTS})
+                                     "used": len(disks), "system": system,
+                                     "total": _RELAY_VIRTIO_SLOTS})
                     except fc.FusionComputeError as exc:
                         rows.append({"relay_id": r.id, "target_id": r.target_id, "used": None,
                                      "total": _RELAY_VIRTIO_SLOTS, "error": str(exc)})

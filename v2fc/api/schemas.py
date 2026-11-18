@@ -4,6 +4,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -186,6 +188,51 @@ class PlanCreate(BaseModel):
     vms: list[PlanVmIn] = Field(min_length=1)
 
 
+class PlanAutoRequest(BaseModel):
+    """Génération automatique des plans d'une source (api/plan_auto.py)."""
+    source_id: uuid.UUID
+    prefix: str = ""
+    # 25 emplacements virtio sur le relais, moins ses propres disques
+    # (l'interface propose la valeur lue sur le relais, GET /relays/capacity).
+    max_disks: int = Field(default=24, ge=1, le=25)
+    max_capacity_gb: float = Field(default=4096, gt=0)
+    max_vms: int = Field(default=0, ge=0)          # 0 : pas de limite
+    pilot_size: int = Field(default=3, ge=0, le=20)  # 0 : pas de vague pilote
+    group_by: list[Literal["dc", "os", "power", "prefix"]] = Field(default=["dc", "os"])
+    dry_run: bool = True
+
+
+class PlanAutoVm(BaseModel):
+    moref: str
+    instance_uuid: str
+    name: str
+    num_disks: int
+    disk_capacity_gb: float
+    os: str
+    power_state: str
+
+
+class PlanAutoPlan(BaseModel):
+    name: str
+    disks: int
+    capacity_gb: float
+    vms: list[PlanAutoVm]
+
+
+class PlanAutoExcluded(BaseModel):
+    name: str
+    reason: str
+
+
+class PlanAutoResponse(BaseModel):
+    plans: list[PlanAutoPlan]
+    excluded: list[PlanAutoExcluded]
+    analysis: dict
+    max_disks: int
+    max_capacity_gb: float
+    created: list[uuid.UUID] = Field(default_factory=list)
+
+
 class PlanNicMapping(BaseModel):
     """Une carte réseau de la VM source et son réseau FusionCompute cible
     (`tgt_network_urn` absent : carte non recréée à la bascule)."""
@@ -299,6 +346,9 @@ class RelayCapacity(BaseModel):
     target_id: uuid.UUID
     used: int | None
     total: int
+    # Disques propres au relais (système...), hors volumes de migration :
+    # `total - system` = disques qu'un plan peut occuper au plus.
+    system: int | None = None
     error: str | None = None
 
 
