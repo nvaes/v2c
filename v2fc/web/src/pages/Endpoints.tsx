@@ -174,13 +174,19 @@ export default function EndpointsPage() {
           />
         </div>
         <div className="form-row">
-          <label>Hôte ou adresse IP</label>
+          <label>{form.kind === "vcenter" ? "Nom DNS (FQDN)" : "Hôte ou adresse IP"}</label>
           <input
             value={form.url}
             onChange={(e) => setForm({ ...form, url: e.target.value })}
-            placeholder="192.0.2.30"
+            placeholder={form.kind === "vcenter" ? "vcenter.example.local" : "192.0.2.30"}
             required
           />
+          {form.kind === "vcenter" && (
+            <span className="muted">
+              Le nom sous lequel le vCenter a été déployé (celui de son certificat et du
+              vSphere Client), pas l'IP d'une autre appliance comme VxRail Manager.
+            </span>
+          )}
         </div>
         <div className="form-row">
           <label>Port</label>

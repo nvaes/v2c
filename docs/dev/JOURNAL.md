@@ -2286,3 +2286,12 @@ FusionCompute a presque toujours un relais auto-enregistré par le runner
   l'endpoint en premier (même 500 au premier correctif).
 - Les jobs qui référencent l'endpoint (source ou cible) bloquent la
   suppression en 409 avec un message, comme les plans.
+
+## 54. Formulaire d'environnement : nom DNS pour un vCenter (27/11/2026)
+
+Pour le type vCenter, le champ hôte demande désormais un nom DNS (FQDN), avec
+un exemple `vcenter.example.local` et une aide : saisir le nom sous lequel le
+vCenter a été déployé, pas l'IP d'une autre appliance. Cas rencontré : l'IP
+saisie était celle du VxRail Manager, qui répond sur `/sdk` par un JSON à lui
+→ sonde « is down or is not a VIM server ». FusionCompute garde « Hôte ou
+adresse IP ». Le DNS du serveur est bien résolu depuis les conteneurs.
