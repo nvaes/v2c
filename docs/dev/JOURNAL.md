@@ -2272,3 +2272,14 @@ défaut : aperçu ; sinon création des plans, sans cible). Logique pure dans
 - Analyse affichée avant création : répartitions OS/DC/état/nb de disques,
   préfixes fréquents (indique si le regroupement par préfixe a du sens),
   plus grosses VM, nombre minimal de remplissages du relais.
+
+## 53. Suppression d'un endpoint FusionCompute : 500 sur clé étrangère (27/11/2026)
+
+`DELETE /api/v1/endpoints/{id}` ne vérifiait que les plans. Une cible
+FusionCompute a presque toujours un relais auto-enregistré par le runner
+(`runner.register_self`) : `relays_target_id_fkey` remontait en 500 nu.
+
+- Les relais de l'endpoint sont maintenant supprimés avec lui (le runner les
+  réenregistre si l'endpoint est recréé).
+- Les jobs qui référencent l'endpoint (source ou cible) bloquent la
+  suppression en 409 avec un message, comme les plans.

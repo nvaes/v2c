@@ -13,7 +13,7 @@ from ..cache import (get_cached_fc_datastores, get_cached_fc_networks,
                      set_cached_fc_datastores, set_cached_fc_networks,
                      set_cached_inventory)
 from ..db import get_db
-from ..models import Credential, Endpoint, Plan, User
+from ..models import Credential, Endpoint, Job, Plan, Relay, User
 from ..schemas import (EndpointCreate, EndpointOut, FcDatastoresResponse,
                        FcNetworksResponse, InventoryProgress, InventoryResponse,
                        ProbeResult)
@@ -103,6 +103,24 @@ async def delete_endpoint(endpoint_id: uuid.UUID, db: AsyncSession = Depends(get
             status_code=status.HTTP_409_CONFLICT,
             detail=f"cet endpoint est encore utilisé par {len(referencing)} plan(s) "
                    f"({names}) — supprimez ou réassignez ces plans avant de le retirer")
+
+    jobs = await db.execute(
+        select(Job.id)
+        .where((Job.source_id == endpoint_id) | (Job.target_id == endpoint_id)))
+    job_count = len(jobs.all())
+    if job_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"cet endpoint est encore référencé par {job_count} job(s) — "
+                   f"supprimez ces jobs avant de le retirer")
+
+    # Les relais d'une cible FusionCompute sont auto-enregistrés par le runner
+    # (runner.register_self) : ils n'ont pas de sens sans leur endpoint et
+    # seront recréés si l'endpoint l'est. Aucun job ne les référence plus (vérifié
+    # ci-dessus, un job porte toujours le target_id de son relais).
+    relays = await db.execute(select(Relay).where(Relay.target_id == endpoint_id))
+    for relay in relays.scalars().all():
+        await db.delete(relay)
 
     credential_id = endpoint.credential_id
     await db.delete(endpoint)
