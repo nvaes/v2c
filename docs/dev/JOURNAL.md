@@ -2281,5 +2281,8 @@ FusionCompute a presque toujours un relais auto-enregistré par le runner
 
 - Les relais de l'endpoint sont maintenant supprimés avec lui (le runner les
   réenregistre si l'endpoint est recréé).
+  Un `flush()` est nécessaire juste après : sans `relationship()` entre
+  Relay et Endpoint, l'unit of work SQLAlchemy émettait le DELETE de
+  l'endpoint en premier (même 500 au premier correctif).
 - Les jobs qui référencent l'endpoint (source ou cible) bloquent la
   suppression en 409 avec un message, comme les plans.

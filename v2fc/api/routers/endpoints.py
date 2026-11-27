@@ -121,6 +121,9 @@ async def delete_endpoint(endpoint_id: uuid.UUID, db: AsyncSession = Depends(get
     relays = await db.execute(select(Relay).where(Relay.target_id == endpoint_id))
     for relay in relays.scalars().all():
         await db.delete(relay)
+    # Pas de relationship() Relay → Endpoint : sans ce flush, l'unit of work
+    # peut émettre le DELETE de l'endpoint avant celui des relais.
+    await db.flush()
 
     credential_id = endpoint.credential_id
     await db.delete(endpoint)
